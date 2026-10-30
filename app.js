@@ -80,6 +80,19 @@ var CodeIn = (function () {
   if (!T && !HP.lst){ var SK=keyLoad(); if (SK && (!X || SK.x===X) && (!CFGX || SK.x===CFGX)){ X=SK.x; T=SK.t; HP.app=T; FROMSAVED=true; } }
   if (!X && !T && !HP.lst){ X=CFGX||bxLoad(); }
   function keyOk(){ var o=keyLoad(); return !!(o && o.x===X && o.t===T); }
+  var PREVK=null;
+  function keyRestore(){
+    if (FROMSAVED || !PREVK || PREVK.x!==X || PREVK.t===T){ PREVK=null; return false; }
+    var pk=PREVK; PREVK=null;
+    try{ localStorage.setItem("bk", JSON.stringify(pk)); }catch(e){}
+    resetSession(); X=pk.x; T=pk.t; HP.app=T; HP.dev=""; FROMSAVED=true;
+    return true;
+  }
+  function keyEarly(){
+    if (FROMSAVED || !T || HP.lst || !XRE.test(X||"") || !/^[0-9a-f]{32}$/.test(T)) return;
+    var old=keyLoad(); PREVK=(old && old.x===X && old.t!==T)?old:null;
+    keySave(); hideKey();
+  }
   function hideKey(){ try{ if (!HP.lst && /(^|[#&])(x|app|dev)=/.test(location.hash||"") && keyOk()) history.replaceState(null,"",location.pathname); }catch(e){} }
   var q=$("q"), out=$("out"), hint=$("hint"), nobox=$("nobox");
   var ZOOM_BASE=1.25, ZOOM_FOLLOW=1, ZOOM_MAX=1.25;
@@ -139,7 +152,7 @@ var CodeIn = (function () {
       .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json().catch(function(){ throw new Error("後端回的不是補藥神器的格式"); }); })
       .then(function(j){ clearTimeout(tm); if (j&&j.ok===1&&bd.k&&TK===bd.k) TK=""; return j; }, function(e){ clearTimeout(tm); throw (e&&e.name==="AbortError")?new Error("等太久沒回應"):e; });
   }
-  var SAFE={appInfo:1, appHome:1, appSearch:1, appSame:1, appPhoto:1, appVoice:1, appEditInfo:1};
+  var SAFE={appInfo:1, appHome:1, appSearch:1, appSame:1, appPhoto:1, appVoice:1, appEditInfo:1, appAll:1};
   var TRIES=3, WAITS=[700,1600], LIMIT_MS=40000, LIMIT_PHOTO=90000;
   function snip(j){ var s=""; try{ s=JSON.stringify(j); }catch(e){} return String(s===undefined?"":s).replace(/\s+/g," ").slice(0,60); }
   function call(fn, args, ok, bad, opt){
@@ -156,6 +169,7 @@ var CodeIn = (function () {
       if (n>1&&opt.retrying) opt.retrying(n);
       post(fn, a, false, SAFE[fn]?(fn==="appPhoto"?LIMIT_PHOTO:LIMIT_MS):0).then(function(j){
         if (sid!==SESS) return;
+        if (NET.off && navigator.onLine!==false){ if (j && j.ok===1) netOk(); else netReset(); }
         if (!j || j.ok!==1){
           var code=j&&typeof j.code==="string"?j.code:"", msg=j&&typeof j.err==="string"?j.err:"";
           if (!msg&&!code&&n<tries){ again(); return; }
@@ -164,7 +178,7 @@ var CodeIn = (function () {
           fail(new Error(msg)); return;
         }
         var res=j.r;
-        if (res && res.sync) syncSoon();
+        if (res && res.sync){ syncSoon(); offAllSoon(4000, true); }
         ok(res);
       }, function(err){
         if (sid!==SESS) return;
@@ -172,6 +186,7 @@ var CodeIn = (function () {
         var why=String(err&&err.message||err||"?"), sec=Math.max(1,Math.round((Date.now()-t0)/1000));
         var e=new Error("連不上後端（"+why+(n>1?"；已自動再試 "+(n-1)+" 次、共 "+sec+" 秒":"")+"），網路好了再試一次");
         e.net=true; e.tech=why+"；試了 "+n+" 次、共 "+sec+" 秒";
+        if (!/等太久/.test(why) || navigator.onLine===false) netOff();
         fail(e);
       });
     }
@@ -184,14 +199,18 @@ var CodeIn = (function () {
   function resetSession(){
     SESS++;
     T=""; HP.app=""; HP.dev=""; FROMSAVED=false; DEV=false; HOME=null; LAST=null; CARD=null; UPD=false; BOUND=false; FULL={}; SAME={};
+    offMemDrop();
     var h=$("home"); h.classList.remove("dev"); var dt=h.querySelector(".devtag"); if (dt) dt.parentNode.removeChild(dt);
     q.value="";
   }
   function stop(msg, code, need){
     SESS++;
+    netReset();
     if (code==="tok"||code==="bind"||code==="dev"){ UPD=false; homeDrop(); }
     if (code==="bind" && need){ bindForm(msg); return; }
     if (code==="tok"){ var sk=keyLoad(); if (!sk || (sk.x===X && (FROMSAVED || sk.t===T))) keyDrop(); if (sk && sk.x===X) bxSave(); }
+    if ((code==="tok" || code==="dev") && keyRestore()){ NET.msg="ℹ️ 這條連結的鑰匙已經失效（過期、重發過，或在別台開過），改用這台原本記住的登入。"; start(); return; }
+    PREVK=null;
     if (code==="tok" && canCode()){ resetSession(); codeForm(msg+"\n可以回 LINE 按「🌐 補藥神器網頁」再開，或用代號登入："); return; }
     if (code==="dev"){ var sk2=keyLoad(); if (sk2 && sk2.x===X && sk2.t===T) keyDrop(); if (canCode()){ resetSession(); codeForm(msg); return; } }
     out.innerHTML='<div class="empty"><b>'+esc(msg).replace(/\n/g,"<br>")+'</b>'+(code==="tok"?"回 LINE 按下面那排的「🌐 補藥神器網頁」再開一次。"+(FROMSAVED?"<br>開過一次，主畫面的圖示就會換成新的連結。":""):"")
@@ -339,12 +358,14 @@ var CodeIn = (function () {
       var r=j&&j.ok===1?j.r:null;
       if (r&&r.ok&&codeOk(r.code, dev)&&/^[0-9a-f]{32}$/.test(String(r.sec||""))){
         PAIR={x:X, code:String(r.code), sec:String(r.sec), ex:t0+Math.max(30,Math.min(900,+r.ttl||CODE_MIN*60))*1000, dev:dev};
+        netReset();
         pairSave(); renderPair("live"); if (PCM) PCM.focus({preventScroll:true}); return;
       }
       renderPair("err", strOf(r&&r.err, j&&j.err)||"沒拿到代號，再試一次");
     }, function(e){
       if (my!==PSEQ || !$("pair")) return;
       var slowE=e&&/等太久/.test(String(e.message));
+      if (!slowE) netOff();
       renderPair("err", slowE?"等太久沒有回應，再試一次":"連不上後端，網路好了再試一次", "", slowE?"（等了 "+Math.round(CODE_WAIT/1000)+" 秒後端都沒回；多半是剛睡醒，再按一次通常就好了）":techOf(e));
     });
   }
@@ -363,6 +384,7 @@ var CodeIn = (function () {
   }
   function codeForm(msg){
     LIVE=true; API="https://script.google.com/macros/s/"+X+"/exec";
+    swReg(); if (navigator.onLine===false) netOff();
     out.innerHTML='<div class="empty codebox"><div class="cdhead"><b>'+esc(msg||"🔐 登入補藥神器").replace(/\n/g,"<br>")+'</b></div>'
       +'<div class="cdgrid"><div class="pairbx" id="pair"></div>'
       +'<div id="cdwrap" hidden><div class="pst2">② LINE 會回你 6 位數的<b>驗證碼</b>，打在這裡</div><div id="cdhost"></div><span class="bindm" id="cdm" role="status"></span></div></div>'
@@ -414,6 +436,7 @@ var CodeIn = (function () {
     PNOTE="";
     resetSession();
     T=String(r.t); HP.app=T; HP.dev=""; FROMSAVED=false; DEV=!!r.dev;
+    offClearAll();
     keySave();
     out.innerHTML=""; $("sf").hidden=false;
     BOUND=!!r.dev;
@@ -484,7 +507,10 @@ var CodeIn = (function () {
     old:"這個瀏覽器太舊，開不了補藥神器。請改用最新的 Chrome 或 Safari。"
   };
 
-  document.addEventListener("error", function(e){ var t=e.target; if(t&&t.tagName==="IMG"&&t.hasAttribute("data-rm")&&t.parentNode) t.parentNode.removeChild(t); }, true);
+  document.addEventListener("error", function(e){ var t=e.target; if(!t||t.tagName!=="IMG") return;
+    if (t.hasAttribute("data-rm")){ if (t.parentNode) t.parentNode.removeChild(t); return; }
+    if (t.hasAttribute("data-off")) offImgFix(t);
+  }, true);
   function esc(s){ return String(s===null||s===undefined?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
   var nbKeep=false;
   function nbHide(){ if (nobox) nobox.hidden=true; }
@@ -642,7 +668,7 @@ var CodeIn = (function () {
     if (r.notice){
       h+='<div class="box notice"><span class="k" role="img" aria-label="公告">⚠️</span><span class="v">'+esc(r.notice)+'</span>';
       var zt=(r.zones&&r.zones.length)?'<table class="zones"><caption>📍 各區位置</caption>'+r.zones.map(function(z){ return '<tr><th>'+esc(z.name)+'</th><td>'+esc(z.pos)+'</td></tr>'; }).join("")+'</table>':'';
-      var np=r.npic?'<img class="npic" src="'+esc(String(r.npic).replace(/([?&]sz=w)\d+/,"$1400"))+'" alt="公告照片" data-big="'+esc(r.npic)+'">':'';
+      var np=r.npic?'<img class="npic" src="'+esc(String(r.npic).replace(/([?&]sz=w)\d+/,"$1400"))+'" alt="公告照片" data-big="'+esc(r.npic)+'" data-off="ph">':'';
       if (zt||np) h+='<div class="nrow">'+(zt||(np?'<span class="sp"></span>':''))+np+'</div>';
       h+='</div>';
     }
@@ -655,7 +681,7 @@ var CodeIn = (function () {
     var pn='', hf=!!r.feat, hp=!!r.photo;
     if (hf) pn+='<div class="box feat"><span class="k">🔍 藥品特徵</span><span class="v">'+esc(r.feat)+'</span></div>';
     if (hasNote||hp) pn+='<div class="grid2'+(hp?'':' nophoto')+'"><div class="pinfo">'+left+'</div>'
-      +(hp?'<img class="photo" src="'+esc(r.photo)+'" alt="藥品照片" data-big="'+esc(r.photo)+'">':'')+'</div>';
+      +(hp?'<img class="photo" src="'+esc(r.photo)+'" alt="藥品照片" data-big="'+esc(r.photo)+'" data-off="ph">':'')+'</div>';
     var ga = hp ? (hf&&hasNote ? "'f i p'" : hf ? "'f p'" : hasNote ? "'i p'" : "'p'") : (hf&&hasNote ? "'f i'" : hf ? "'f'" : "'i'");
     var gc = hp&&!hf&&!hasNote ? 'auto' : hp ? (hf&&hasNote ? 'minmax(0,1.1fr) minmax(0,1fr) auto' : 'minmax(0,1fr) auto') : (hf&&hasNote ? 'minmax(0,1.1fr) minmax(0,1fr)' : 'minmax(0,1fr)');
     var sp='';
@@ -663,7 +689,7 @@ var CodeIn = (function () {
       sp='<div class="spots">'+r.spots.map(function(s){ return '<button type="button" data-spot="'+esc(s.name)+'" aria-pressed="'+(s.name===spot)+'">'+esc(s.name)+'</button>'; }).join("")+'</div>';
     }
     var lr='<div class="locrow"><div class="lleft"><div class="loc"><span class="pin">'+PIN2+'</span><span class="t">'+esc(r.location||"—")+'</span></div>'+sp+'</div>'
-      +(mapUrl?'<img class="map" src="'+esc(mapUrl)+'" alt="平面圖" data-big="'+esc(r.mapBig||mapUrl)+'">':'')+'</div>';
+      +(mapUrl?'<img class="map" src="'+esc(mapUrl)+'" alt="平面圖" data-big="'+esc(r.mapBig||mapUrl)+'" data-off="map">':'')+'</div>';
     h+='<div class="cbody">'+(pn?'<div class="pnl'+(hp&&!hf&&!hasNote?' solo':'')+'" style="--ga:'+ga+';--gc:'+gc+'">'+pn+'</div>':'')+lr+'</div>';
     var acts=[];
     if (backTo&&(backTo.length>1||(LAST&&LAST.photo&&LAST.rows===backTo))) acts.push('<button type="button" class="quiet" id="back">← 回清單</button>');
@@ -675,7 +701,7 @@ var CodeIn = (function () {
     Array.prototype.forEach.call(out.querySelectorAll("img[data-big]"),function(im){ im.onclick=function(){ $("lbimg").src=im.dataset.big; $("lb").hidden=false; }; });
     Array.prototype.forEach.call(out.querySelectorAll(".spots button"),function(b){ b.onclick=function(){ SPOT[r.code]=b.dataset.spot; renderCard(r, backTo); }; });
     if ($("back")) $("back").onclick=function(){ if (LAST&&LAST.photo&&LAST.rows===backTo) renderPhoto(LAST.photo); else renderList(backTo); };
-    if (!SAME[r.code]) call("appSame",[T, r.code],function(res){ if(!res||res.err) return; SAME[r.code]=res; var el=$("same"); if(el&&out.contains(el)&&el.closest("article")&&el.closest("article").getAttribute("data-code")===String(r.code)) el.innerHTML=sameHtml(res); });
+    if (!SAME[r.code] && !NET.off) call("appSame",[T, r.code],function(res){ if(!res||res.err) return; SAME[r.code]=res; var el=$("same"); if(el&&out.contains(el)&&el.closest("article")&&el.closest("article").getAttribute("data-code")===String(r.code)) el.innerHTML=sameHtml(res); }, function(){});
     if ($("edit")) $("edit").onclick=function(){ renderEdit(r, backTo); };
     fitCard();
     window.scrollTo({top:0});
@@ -738,6 +764,7 @@ var CodeIn = (function () {
     return h;
   }
   function renderEdit(r, backTo){
+    if (NET.off){ setHint("📴 離線中：修改要有網路，網路好了再改", true); return; }
     out.innerHTML='<article class="card"><div class="head"><div class="t"><div class="code mono">'+esc(r.code)+'</div><div class="brand">'+esc(r.brand)+'</div></div></div><div class="edit"><div class="t">✏️ 讀現在的內容…</div></div></article>';
     window.scrollTo({top:0});
     call("appEditInfo",[T, r.code],function(info){
@@ -875,7 +902,9 @@ var CodeIn = (function () {
     kw=(kw||q.value||"").trim(); if(!kw) return;
     if (/[0-9a-f]{32}/i.test(kw) || /[#&?](x|app|dev|lst)=|https?:\/\/|script\.google|github\.io/i.test(kw)){ q.value=""; setHint("⚠️ 這看起來是連結或鑰匙，沒有送出去。補藥神器不會叫你把連結貼在這裡，有人這樣要求就是詐騙。", true); return; }
     q.value=""; setHint("查「"+kw+"」…", false, true);
-    call("appSearch",[T, kw],function(res){ show(res, "「"+kw+"」", kw); });
+    if (NET.off){ offReady().then(function(){ var r0=offSearch(kw); if (r0){ show(r0, "「"+kw+"」（離線）", kw); return; } setHint("📴 離線中：這台還沒有存可以離線查的資料（要先在有網路的時候開過一次）", true); }); return; }
+    call("appSearch",[T, kw],function(res){ show(res, "「"+kw+"」", kw); },
+      function(e){ if (e&&e.net){ offReady().then(function(){ var r1=OFF_ALL?offSearch(kw):null; if (r1) show(r1, "「"+kw+"」（離線）", kw); else setHint("❌ "+(e&&e.message||e), true); }); return; } setHint("❌ "+(e&&e.message||e), true); });
   }
   $("sf").onsubmit=function(e){ e.preventDefault(); search(); q.blur(); };
 
@@ -932,6 +961,7 @@ var CodeIn = (function () {
   function recErr(why){ recOn=false; $("mic").className=""; tapOff(true); setHint("🎤 "+(why==="denied"?"麥克風沒有允許：請在瀏覽器的網站設定允許麥克風（在 LINE 裡開的，請按右上角改用瀏覽器開）":"錄音失敗（"+why+"），再試一次"), true); }
   function startRec(){
     if (mrec&&mrec.state==="recording") return;
+    if (NET.off){ setHint("📴 離線中：語音辨識要有網路，先用打字查", true); return; }
     chunks=[];
     navigator.mediaDevices.getUserMedia({audio:true}).then(function(st){
       mstream=st; var mime=pickMime();
@@ -1025,6 +1055,7 @@ var CodeIn = (function () {
   var PH_MAIN={px:2000, q:.85, kb:900}, PH_SMALL={px:1280, q:.75, kb:250};
   function sendPhoto(file){
     if (noKey()) return;
+    if (NET.off){ setHint("📴 離線中：拍照辨識要有網路，先用打字查", true); return; }
     setHint("📷 讀照片…", false, true);
     shrink(file,function(b64,mime,kb,alt){
       var cur={b64:b64, mime:mime, kb:kb, small:false}, sent=[];
@@ -1092,13 +1123,225 @@ var CodeIn = (function () {
   }
   function aiWarnAdd(){ var w=document.createElement("span"); w.className="aiw"; w.textContent="⚠️ AI 可能讀錯，請核對藥櫃標籤紙"; hint.appendChild(document.createElement("br")); hint.appendChild(w); }
 
-  var UPD=false, HOME_KEEP_MS=7*864e5;
-  function homeLoad(){ try{ var o=JSON.parse(localStorage.getItem("bh1")||"null"), now=Date.now();
-    if (o && o.x===X && typeof o.at==="number" && o.at<=now+6e4 && now-o.at<HOME_KEEP_MS && o.d && Array.isArray(o.d.notices) && Array.isArray(o.d.drugs) && o.d.drugs.length) return o;
-    if (o && o.x===X) homeDrop();
-    }catch(e){} return null; }
-  function homeSave(d){ try{ if (T && LIVE && d && Array.isArray(d.notices) && Array.isArray(d.drugs) && d.drugs.length) localStorage.setItem("bh1", JSON.stringify({x:X, at:Date.now(), d:{notices:d.notices, drugs:d.drugs}})); }catch(e){} }
-  function homeDrop(){ try{ var o=JSON.parse(localStorage.getItem("bh1")||"null"); if (!o || o.x===X) localStorage.removeItem("bh1"); }catch(e){ try{ localStorage.removeItem("bh1"); }catch(x){} } }
+  var UPD=false;
+  var NET={off:false, bar:null, tm:0, msg:"", swap:false, ikeys:{}, allAt:0, allBusy:false, allTm:0, imgBusy:false, blobs:{}, keyP:null, keyT:"", sw:""};
+  var OFF_DB="byoff", OFF_STORE="c", OFF_TTL=24*36e5, OFF_FRESH=30*6e4, OFF_IMG_MAX=4e6, OFF_IMG_TOTAL=60e6, OFF_RETRY_MS=20000;
+  var OFF_ALL=null, OFF_IDX=null;
+  function offCan(){ return !!(LIVE && window.indexedDB && window.crypto && crypto.subtle && window.TextEncoder && window.TextDecoder && DK && T && XRE.test(X||"")); }
+  function offDb(){ return new Promise(function(ok,bad){ try{ var r=indexedDB.open(OFF_DB,1); r.onupgradeneeded=function(){ try{ r.result.createObjectStore(OFF_STORE); }catch(e){} }; r.onsuccess=function(){ ok(r.result); }; r.onerror=function(){ bad(r.error||new Error("idb")); }; r.onblocked=function(){ bad(new Error("idb blocked")); }; }catch(e){ bad(e); } }); }
+  function offTx(mode, fn){ return offDb().then(function(d){ return new Promise(function(ok,bad){ var out, tx; try{ tx=d.transaction(OFF_STORE,mode); out=fn(tx.objectStore(OFF_STORE)); }catch(e){ d.close(); bad(e); return; } tx.oncomplete=function(){ d.close(); ok(out&&out.result!==undefined?out.result:undefined); }; tx.onerror=function(){ d.close(); bad(tx.error||new Error("idb tx")); }; tx.onabort=function(){ d.close(); bad(tx.error||new Error("idb abort")); }; }); }); }
+  function offKey(){
+    if (!offCan()) return Promise.reject(new Error("nokey"));
+    if (NET.keyP && NET.keyT===T) return NET.keyP;
+    NET.keyT=T;
+    NET.keyP=crypto.subtle.digest("SHA-256", new TextEncoder().encode("byoff|"+DK+"|"+T+"|"+X)).then(function(b){ return crypto.subtle.importKey("raw", b, {name:"AES-GCM"}, false, ["encrypt","decrypt"]); });
+    NET.keyP.catch(function(){ NET.keyP=null; });
+    return NET.keyP;
+  }
+  function offPutRaw(key, buf, meta){
+    var iv=new Uint8Array(12); try{ crypto.getRandomValues(iv); }catch(e){ return Promise.reject(e); }
+    return offKey().then(function(k){ return crypto.subtle.encrypt({name:"AES-GCM", iv:iv}, k, buf); })
+      .then(function(ct){ var rec={iv:Array.prototype.slice.call(iv), ct:ct, at:Date.now()}; if (meta) for (var m in meta) if (Object.prototype.hasOwnProperty.call(meta,m)) rec[m]=meta[m]; return offTx("readwrite", function(st){ return st.put(rec, key); }); });
+  }
+  function offPut(key, body){ return offPutRaw(key, new TextEncoder().encode(JSON.stringify(body))); }
+  function offGetRaw(key){
+    return offTx("readonly", function(st){ return st.get(key); }).then(function(rec){
+      var at=rec?+rec.at||0:0;
+      if (!rec || !rec.ct || !rec.iv || Date.now()-at>OFF_TTL || at>Date.now()+6e4){ if (rec) offDel(key); return null; }
+      return offKey().then(function(k){ return crypto.subtle.decrypt({name:"AES-GCM", iv:new Uint8Array(rec.iv)}, k, rec.ct); })
+        .then(function(buf){ return {buf:buf, rec:rec}; })
+        .catch(function(){ offDel(key); return null; });
+    }).catch(function(){ return null; });
+  }
+  function offGet(key){ return offGetRaw(key).then(function(o){ if (!o) return null; try{ return JSON.parse(new TextDecoder("utf-8").decode(o.buf)); }catch(e){ offDel(key); return null; } }); }
+  function offDel(key){ try{ offTx("readwrite", function(st){ return st.delete(key); }).catch(function(){}); }catch(e){} }
+  function offKeys(){ return offTx("readonly", function(st){ return st.getAllKeys(); }).then(function(ks){ return ks||[]; }, function(){ return []; }); }
+  function offBlobsDrop(){ for (var u in NET.blobs){ try{ URL.revokeObjectURL(NET.blobs[u]); }catch(e){} } NET.blobs={}; }
+  function offMemDrop(){ OFF_ALL=null; OFF_IDX=null; NET.allAt=0; NET.keyP=null; NET.keyT=""; NET.ikeys={}; clearTimeout(NET.allTm); NET.allTm=0; offBlobsDrop(); }
+  function offClearAll(){ offMemDrop(); try{ if (window.indexedDB) offTx("readwrite", function(st){ return st.clear(); }).catch(function(){}); }catch(e){} }
+  function homeLoad(){ if (!offCan()) return Promise.resolve(null); return offGet("h").then(function(o){ return (o && Array.isArray(o.notices) && Array.isArray(o.drugs) && o.drugs.length) ? {at:+o.at||0, d:{notices:o.notices, drugs:o.drugs}} : null; }); }
+  function homeSave(d){ if (!offCan() || !d || !Array.isArray(d.notices) || !Array.isArray(d.drugs) || !d.drugs.length) return; offPut("h", {notices:d.notices, drugs:d.drugs, at:Date.now()}).catch(function(){}); }
+  function homeDrop(){ offClearAll(); }
+  function offAllLoad(){ if (!offCan()) return Promise.resolve(null); return offGet("a").then(function(o){ if (o && Array.isArray(o.rows) && o.rows.length){ OFF_ALL=o.rows; OFF_IDX=null; NET.allAt=+o.at||0; return o; } return null; }); }
+  function offAllSoon(ms, force){ if (!offCan()) return; clearTimeout(NET.allTm); NET.allTm=setTimeout(function(){ NET.allTm=0; offAllNow(force); }, ms||1500); }
+  function offAllNow(force){
+    if (!offCan() || NET.off || NET.allBusy) return;
+    if (!force && OFF_ALL && Date.now()-NET.allAt<OFF_FRESH){ offImgSync(OFF_ALL); return; }
+    NET.allBusy=true;
+    call("appAll",[T],function(r){
+      NET.allBusy=false;
+      if (!r || r.err || !Array.isArray(r.rows) || !r.rows.length) return;
+      OFF_ALL=r.rows; OFF_IDX=null; NET.allAt=Date.now();
+      var swap=!!NET.swap; NET.swap=false;
+      var wipe=swap ? offTx("readwrite", function(st){ return st.clear(); }).catch(function(){}) : Promise.resolve();
+      if (swap) offBlobsDrop();
+      wipe.then(function(){
+        if (swap && HOME) homeSave(HOME);
+        return offPut("a", {rows:r.rows, at:NET.allAt, v:String(r.v||"")});
+      }).then(function(){ offImgSync(r.rows); }, function(){});
+    }, function(){ NET.allBusy=false; });
+  }
+  function offSameSite(u){ try{ var a=new URL(u, location.href); return a.origin===location.origin && /^https?:$/.test(a.protocol); }catch(e){ return false; } }
+  function offImgUrls(rows){
+    var seen={}, L=[];
+    rows.forEach(function(r){ var us=[r.map, r.mapBig]; (r.spots||[]).forEach(function(s){ us.push(s.map, s.mapBig); }); us.forEach(function(u){ u=String(u||""); if (!u || seen[u] || !offSameSite(u)) return; seen[u]=1; L.push(u); }); });
+    return L;
+  }
+  function offImgKey(u){
+    if (NET.ikeys[u]) return Promise.resolve(NET.ikeys[u]);
+    return crypto.subtle.digest("SHA-256", new TextEncoder().encode("byimg|"+u)).then(function(b){ var k="i|"+hex(b).slice(0,32); NET.ikeys[u]=k; return k; });
+  }
+  function offImgSync(rows){
+    if (!offCan() || NET.off || NET.imgBusy || !rows || !window.fetch) return;
+    try{ if (navigator.connection && navigator.connection.saveData) return; }catch(e){}
+    var want=offImgUrls(rows);
+    NET.imgBusy=true;
+    Promise.all(want.map(offImgKey)).then(function(wk){
+      var wantSet={}; wk.forEach(function(k){ wantSet[k]=1; });
+      return offKeys().then(function(ks){
+        var have={}, total=0;
+        ks.forEach(function(k){ if (typeof k==="string" && k.indexOf("i|")===0){ if (!wantSet[k]) offDel(k); else have[k]=1; } });
+        var todo=want.filter(function(u,i){ return !have[wk[i]]; });
+        (function next(){
+          if (!todo.length || NET.off || !offCan()){ NET.imgBusy=false; return; }
+          var u=todo.shift(), done=function(){ setTimeout(next, 150); };
+          fetch(u, {credentials:"omit", cache:"force-cache", referrerPolicy:"no-referrer"})
+            .then(function(r){ if (!r.ok) throw new Error("http"); var ct=String(r.headers.get("content-type")||"image/png").split(";")[0].trim(); return r.arrayBuffer().then(function(b){ return {b:b, ct:ct}; }); })
+            .then(function(x){ if (!x.b || !x.b.byteLength || x.b.byteLength>OFF_IMG_MAX || !/^image\//.test(x.ct)) return; total+=x.b.byteLength; if (total>OFF_IMG_TOTAL) return; return offPutRaw(NET.ikeys[u], x.b, {mime:x.ct}); })
+            .then(done, done);
+        })();
+      });
+    }).catch(function(){ NET.imgBusy=false; });
+  }
+  function offImgGet(u){
+    if (NET.blobs[u]) return Promise.resolve(NET.blobs[u]);
+    if (!offCan()) return Promise.resolve("");
+    return offImgKey(u).then(offGetRaw).then(function(o){ if (!o) return ""; try{ var bu=URL.createObjectURL(new Blob([o.buf], {type:o.rec.mime||"image/png"})); NET.blobs[u]=bu; return bu; }catch(e){ return ""; } }, function(){ return ""; });
+  }
+  function offImgFix(im){
+    if (!im || im.dataset.offTried) return; im.dataset.offTried="1";
+    var kind=im.getAttribute("data-off")||"", u=im.getAttribute("src")||"";
+    var put=function(msg){ if (!im.parentNode) return; var d=document.createElement("div"); d.className=im.className+" "+(kind==="map"?"offmap":"offph"); d.setAttribute("role","img"); d.setAttribute("aria-label",msg); d.textContent=msg; im.parentNode.replaceChild(d, im); };
+    if (kind!=="map"){ if (NET.off) put("📴 離線中：照片要有網路"); return; }
+    offImgGet(u).then(function(bu){ if (!im.parentNode) return; if (bu){ im.dataset.big=bu; im.src=bu; return; } put(NET.off?"📴 離線中：這張位置圖沒存在這台（要先在有網路時看過）":"（位置圖載不到）"); });
+  }
+  var OFF_LOC_RE=/^(水)?[A-Z]{1,2}[0-9]{1,3}$/;
+  function offNorm(s){ return String(s===null||s===undefined?"":s).replace(/[！-～]/g,function(c){ return String.fromCharCode(c.charCodeAt(0)-65248); }).replace(/　/g," ").toUpperCase().replace(/\s+/g," ").trim(); }
+  function offSqz(s){ return offNorm(s).replace(/[^A-Z0-9一-鿿]/g,""); }
+  function offSubseq(t, kw){ var j=0; for (var i=0;i<t.length&&j<kw.length;i++) if (t.charAt(i)===kw.charAt(j)) j++; return j===kw.length; }
+  function offIdx(){
+    if (!OFF_ALL) return null;
+    if (!OFF_IDX || OFF_IDX.rows!==OFF_ALL){
+      OFF_IDX={rows:OFF_ALL, h:[], l:[], s:[], c:[]};
+      OFF_ALL.forEach(function(r,i){ OFF_IDX.c[i]=offNorm(r.code); OFF_IDX.h[i]=offNorm([r.code,r.brand,r.chName,r.generic].join(" ")); OFF_IDX.l[i]=offNorm(r.location||""); OFF_IDX.s[i]=offSqz([r.code,r.brand,r.chName].join(" ")); });
+    }
+    return OFF_IDX;
+  }
+  function offSearch(kw){
+    var ix=offIdx(); if (!ix) return null;
+    var rows=ix.rows, raw=offNorm(kw), out=[], i, k;
+    if (!raw) return {rows:[]};
+    var kws=raw.replace(/[，、；;,\/／\-－+＋]/g," ").split(/\s+/).filter(String);
+    if (!kws.length) return {rows:[]};
+    if (kws.length===1){ for (i=0;i<rows.length;i++) if (ix.c[i]===kws[0]) return {rows:[rows[i]]}; }
+    if (kws.length>=2 && kws.every(function(k){ return /^\d{4,6}$/.test(k); })){
+      var byc={}; for (i=0;i<rows.length;i++) byc[ix.c[i]]=rows[i];
+      kws.slice(0,12).forEach(function(k){ if (byc[k]) out.push(byc[k]); });
+      if (out.length) return {rows:out};
+    }
+    if (kws.length===1 && OFF_LOC_RE.test(kws[0])){
+      for (i=0;i<rows.length;i++){ var l=ix.l[i]; if (l===kws[0] || l.replace(/[（(].*$/,"").trim()===kws[0]) out.push(rows[i]); }
+      if (out.length) return {rows:out, title:"「"+kws[0]+"」這一格有 "+out.length+" 個品項", loc:kws[0]};
+    }
+    var cand=[];
+    for (i=0;i<rows.length;i++){
+      var h=ix.h[i], hit=true;
+      for (k=0;k<kws.length;k++) if (h.indexOf(kws[k])<0){ hit=false; break; }
+      if (!hit) continue;
+      var b=offNorm(rows[i].brand), z=offNorm(rows[i].chName), g=offNorm(rows[i].generic), k0=kws[0];
+      cand.push({i:i, s:(b===k0||z===k0)?0:(b.indexOf(k0)===0||z.indexOf(k0)===0)?1:(g.indexOf(k0)===0)?2:3});
+    }
+    if (cand.length){ cand.sort(function(a,b){ return a.s-b.s||a.i-b.i; }); return {rows:cand.slice(0,80).map(function(c){ return rows[c.i]; })}; }
+    for (i=0;i<rows.length;i++){ var lo=ix.l[i], all=true; for (k=0;k<kws.length;k++) if (lo.indexOf(kws[k])<0){ all=false; break; } if (all) out.push(rows[i]); }
+    if (out.length) return kws.length===1 ? {rows:out.slice(0,200), title:"「"+kws[0]+"」這一格有 "+out.length+" 個品項", loc:kws[0]} : {rows:out.slice(0,80)};
+    var sq=offSqz(kw);
+    if (sq.length>=3 && !/^\d+$/.test(sq)){ for (i=0;i<rows.length;i++) if (ix.s[i].indexOf(sq)>=0) out.push(rows[i]); if (out.length) return {rows:out.slice(0,80)}; }
+    var guess=[], g0=kws[0], g2=g0.slice(0,2);
+    if (g0.length>=2) for (i=0;i<rows.length&&guess.length<6;i++){ var bb=offNorm(rows[i].brand), zz=offNorm(rows[i].chName); if (bb.indexOf(g2)===0 || zz.indexOf(g2)===0 || (/^[一-鿿]+$/.test(g0) && g0.length<=5 && offSubseq(zz, g0))) guess.push(rows[i]); }
+    return {rows:[], guess:guess};
+  }
+  function offReady(){ return OFF_ALL ? Promise.resolve(OFF_ALL) : offAllLoad().then(function(){ return OFF_ALL; }); }
+  function offAgo(at){ var m=Math.max(0,Math.round((Date.now()-at)/6e4)); return m<1?"剛剛":m<60?m+" 分鐘前":Math.round(m/60)+" 小時前"; }
+  function netBarText(){
+    if (noKey()) return "📴 離線中：登入要有網路，網路好了會自動再試。";
+    if (OFF_ALL) return "📴 離線中（連不到後端）：查的是 "+offAgo(NET.allAt)+" 存在這台的藥品資料（文字＋位置圖）；拍照、語音、修改、藥品家族要等網路。網路好了會自動把這份刪掉、換成最新的。";
+    return "📴 離線中（連不到後端）：這台還沒有存可以離線查的資料（要先在有網路的時候開過一次）。網路好了會自動再試。";
+  }
+  function netBarH(){ try{ var h=NET.bar?NET.bar.offsetHeight:0; document.documentElement.style.setProperty("--offh", h+"px"); }catch(e){} }
+  function netBar(on){
+    if (!on){ if (NET.bar){ if (NET.bar.parentNode) NET.bar.parentNode.removeChild(NET.bar); NET.bar=null; } document.documentElement.classList.remove("by-off"); try{ document.documentElement.style.removeProperty("--offh"); }catch(e){} return; }
+    if (!NET.bar){
+      var b=document.createElement("div"); b.className="offbar"; b.id="offbar"; b.setAttribute("role","status"); b.setAttribute("aria-live","polite");
+      b.innerHTML='<span class="offbar-t"></span><button type="button" class="offbar-b" id="offretry">🔄 重試</button>';
+      document.body.insertBefore(b, document.body.firstChild);
+      NET.bar=b; b.querySelector("#offretry").onclick=function(){ netRetry(true); };
+      document.documentElement.classList.add("by-off");
+      try{ window.addEventListener("resize", netBarH); }catch(e){}
+    }
+    NET.bar.querySelector(".offbar-t").textContent=netBarText();
+    netBarH();
+  }
+  function netOff(){
+    if (!LIVE) return;
+    if (!NET.off){ NET.off=true; offReady().then(function(){ netBar(true); }); netBar(true); }
+    else if (NET.bar) netBar(true);
+    if (!NET.tm) NET.tm=setInterval(function(){ netRetry(false); }, OFF_RETRY_MS);
+  }
+  function netReset(){ NET.off=false; netBar(false); if (NET.tm){ clearInterval(NET.tm); NET.tm=0; } }
+  function netOk(){
+    if (!NET.off) return;
+    var had=!!OFF_ALL;
+    netReset();
+    if (noKey()) return;
+    NET.swap=had;
+    NET.msg="🌐 網路回來了"+(had?"：重新拿最新的資料，離線時用的暫存刪掉。":"。");
+    if ($("nlist")) start(); else { setHint(NET.msg, false, true); homeRefresh(); }
+    offAllSoon(800, true);
+  }
+  function netRetry(manual){
+    if (!LIVE || !NET.off) return;
+    if (noKey()){
+      if ($("pair") && !PBUSY && !(PAIR && !PAIR.dead && PAIR.ex>Date.now()) && typeof pairStart==="function"){ pairStart(); return; }
+      netPing().then(function(up){ if (up) netReset(); else if (manual) netBar(true); });
+      return;
+    }
+    post("appInfo",[],false,8000).then(function(j){
+      if (j && j.ok===1){ netOk(); return; }
+      if (j && (j.code==="tok"||j.code==="bind"||j.code==="dev")){ netReset(); stop(String(j.err||"登入的鑰匙有問題"), j.code, j.need); return; }
+      if (manual) netBar(true);
+    }, function(){ if (manual) netBar(true); });
+  }
+  function netPing(){
+    if (!window.fetch) return Promise.resolve(false);
+    try{ return fetch("bsw.js?p="+Date.now(), {method:"HEAD", cache:"no-store", credentials:"omit", referrerPolicy:"no-referrer"}).then(function(){ return true; }, function(){ return false; }); }catch(e){ return Promise.resolve(false); }
+  }
+  function homeRefresh(){
+    call("appHome",[T,1],function(res){ if (NET.msg){ setHint(NET.msg); NET.msg=""; } if (!res || res.err || !Array.isArray(res.drugs) || !res.drugs.length) return; HOME={notices:res.notices||[], drugs:res.drugs}; homeSave(HOME); }, function(){ if (NET.msg){ setHint(NET.msg); NET.msg=""; } });
+  }
+  function swReg(){
+    try{
+      if (!LIVE || NET.sw || !("serviceWorker" in navigator) || !/^https?:$/.test(location.protocol)) return;
+      NET.sw="try";
+      navigator.serviceWorker.register("bsw.js", {updateViaCache:"none"}).then(function(reg){ NET.sw=reg&&reg.scope?"ok":"no"; }, function(){ NET.sw="no"; });
+    }catch(e){ NET.sw="no"; }
+  }
+  function offStart(){
+    try{ localStorage.removeItem("bh1"); }catch(e){}
+    try{
+      window.addEventListener("offline", function(){ if (LIVE) netOff(); });
+      window.addEventListener("online", function(){ if (LIVE && NET.off) netRetry(false); });
+    }catch(e){}
+  }
   function homeSig(d){ try{ return JSON.stringify([d.notices, d.drugs]); }catch(e){ return ""; } }
   function updOff(){ UPD=false; var a=$("acount"); if (a) a.textContent=a.textContent.replace("・更新中…",""); }
   function ready(info){
@@ -1127,8 +1370,15 @@ var CodeIn = (function () {
       });
       return;
     }
-    var t0=Date.now(), c=homeLoad(), shown=!!c;
-    setHint(hint0());
+    var t0=Date.now(), sid0=SESS;
+    swReg();
+    if (navigator.onLine===false) netOff();
+    offAllLoad().catch(function(){ return null; });
+    homeLoad().then(function(c){ if (sid0!==SESS) return; startLive(c, t0); }, function(){ if (sid0===SESS) startLive(null, t0); });
+  }
+  function startLive(c, t0){
+    var shown=!!c;
+    setHint(NET.msg||hint0());
     var h0=hint.innerHTML+"|"+hint.className;
     if (c){ HOME=c.d; UPD=true; renderHome(); } else homeShell();
     call("appHome",[T,1],function(res){
@@ -1138,7 +1388,8 @@ var CodeIn = (function () {
         var ms=Date.now()-t0, d={notices:res.notices||[], drugs:res.drugs||[], ms:res.ms};
         ready(info);
         var mine=(hint.innerHTML+"|"+hint.className)===h0;
-        if (mine) setHint(hint0());
+        if (mine) setHint(NET.msg||hint0());
+        NET.msg="";
         BOUND=false;
         if (shown && !d.drugs.length){
           updOff();
@@ -1147,6 +1398,7 @@ var CodeIn = (function () {
         }
         var same=shown && homeSig(HOME)===homeSig(d);
         HOME=d.drugs.length?d:null; homeSave(d);
+        offAllSoon(1500, !same);
         if ($("nlist")){ if (same) updOff(); else { UPD=false; fillHome(d); } }
         else UPD=false;
         if (mine) devTime(ms, res.ms, shown);
@@ -1156,7 +1408,7 @@ var CodeIn = (function () {
         function(){ go(null); });
     }, function(e){
       updOff();
-      if (shown && $("acount")){ setHint("⚠️ "+(e&&e.net?"連不上後端":(e&&e.message||"後台沒有回應"))+"，先顯示上次的清單（可能不是最新）", true); return; }
+      if (shown && $("acount")){ setHint((e&&e.net?"📴 連不上後端":"⚠️ "+(e&&e.message||"後台沒有回應"))+"，先顯示存在這台的上次清單（可能不是最新）", true); return; }
       setHint("❌ "+(e&&e.message||e), true);
       if (!shown) homeFail(String(e&&e.message||e||"連不上後端"));
     });
@@ -1201,9 +1453,10 @@ var CodeIn = (function () {
 
   var MOCK={};
 
+  offStart();
   backendCheck(function(){
     gate(function(g){
-      if (g==="ok"){ LIVE=true; API="https://script.google.com/macros/s/"+X+"/exec"; start(); return; }
+      if (g==="ok"){ LIVE=true; API="https://script.google.com/macros/s/"+X+"/exec"; keyEarly(); start(); return; }
       if (g==="code"){ codeForm(); return; }
       if (g==="none" && MOCK && MOCK.appInfo){ $("demo").hidden=false; start(); return; }
       stop(GATE_MSG[g]||GATE_MSG.bad, g);

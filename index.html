@@ -2,10 +2,11 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src https://script.google.com https://script.googleusercontent.com; media-src 'self' blob: data:; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https://script.google.com https://script.googleusercontent.com; media-src 'self' blob: data:; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'; worker-src 'self'">
+
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="buyao-v" content="v6">
+<meta name="buyao-v" content="v7">
 <title>補藥神器</title>
 <link rel="icon" href="icon.png">
 <link rel="apple-touch-icon" href="icon.png">
@@ -419,9 +420,17 @@
   @media (min-width:760px){ .sheet{align-items:center; padding:20px} .sheetin{border-radius:16px; padding:18px 20px} }
   .demo{position:fixed; left:0; right:0; bottom:0; z-index:6; background:var(--warn-soft); color:var(--warn); font-size:12px;
     text-align:center; padding:6px 12px calc(6px + env(safe-area-inset-bottom,0px)); border-top:1px solid var(--line)}
+  .offbar{position:sticky; top:env(safe-area-inset-top,0px); z-index:7; display:flex; align-items:center; gap:10px; padding:8px 14px;
+    background:var(--warn-soft); color:var(--warn); border-bottom:1px solid var(--line); font-size:13.5px; line-height:1.45}
+  .offbar-t{flex:1 1 auto; min-width:0}
+  .offbar-b{flex:0 0 auto; border:1px solid var(--warn); background:var(--surface); color:var(--warn); border-radius:999px; padding:5px 12px; font-size:13px; font-weight:700; cursor:pointer}
+  .by-off .top{top:calc(env(safe-area-inset-top,0px) + var(--offh,0px))}
+  .offmap,.offph{display:flex; align-items:center; justify-content:center; text-align:center; color:var(--muted); background:var(--sunk); border:1px dashed var(--line); border-radius:10px; font-size:13px; line-height:1.4; padding:10px; min-height:84px}
+  .map.offmap{flex:1 1 200px; min-width:200px}
+  @media (min-width:760px){ .offbar{padding:8px 18px; font-size:14px} .map.offmap{flex:0 0 auto; width:min(320px,100%); min-width:0; height:var(--maph,278px); margin-left:auto} }
 </style>
 <script src="cfg.js" defer></script>
-<script src="app.js?v=v6" defer></script>
+<script src="app.js?v=v7" defer></script>
 </head>
 <body>
 <header class="top"><div class="topin">
