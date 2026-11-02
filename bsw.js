@@ -1,5 +1,5 @@
-var V = "by-v8";
-var ASSETS = ["app.js?v=v8", "icon.png", "icon-192.png", "icon-512.png", "icon-512m.png", "manifest.webmanifest"];
+var V = "by-v8b";
+var ASSETS = ["app.js?v=v8b", "icon.png", "icon-192.png", "icon-512.png", "icon-512m.png", "manifest.webmanifest"];
 var PAGES = ["index.html"];
 var SOFT = ["cfg.js"];
 var BASE = self.registration.scope;

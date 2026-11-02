@@ -979,10 +979,13 @@ var CodeIn = (function () {
   }
   function mvLocPicker(box, info, pick){
     var locs=info.locs||[], has={}; locs.forEach(function(x){ has[x.loc]=x.n; });
+    var pls=info.places||[];
     var h='<div class="mvstep">① 選櫃</div><div class="mvgrid c5">'+MV_CABS.map(function(c){ return '<button type="button" data-cab="'+c+'">'+c+'</button>'; }).join("")+'</div>'
-      +'<div class="mvgrid c2"><button type="button" data-cab="水">💧 水櫃</button><button type="button" data-cab="中">中文的（棧板…）</button></div>'
+      +'<div class="mvgrid c2"><button type="button" data-cab="水">💧 水櫃</button>'+(pls.length?'':'<button type="button" data-cab="中">棧板、水棧、其他</button>')+'</div>'
       +'<div class="mvstep" data-l2 hidden></div><div class="mvgrid c5" data-lay hidden></div>'
-      +'<div class="mvtype"><input placeholder="或直接打：C2、水A1、棧左" autocapitalize="characters" data-lin><button type="button" data-lgo>看改前 → 改後</button></div>';
+      +(pls.length?'<div class="mvgrp" data-pls>'+pls.map(function(g){ return '<div class="mvstep">'+esc(g.g)+'</div><div class="mvgrid c3">'+g.l.map(function(x){ return '<button type="button" data-pl="'+esc(x.loc)+'">'+esc(x.loc)+(has[x.loc]?'<small>'+has[x.loc]+' 支</small>':'')+'</button>'; }).join("")+'</div>'; }).join("")+'</div>':'')
+      +'<div class="mvbar"><button type="button" class="pri" data-own>✍️ 自己填入</button></div>'
+      +'<div class="mvtype" data-ownbox'+(pls.length?' hidden':'')+'><input placeholder="打位置：C2、水A1、棧板C區" autocapitalize="characters" data-lin><button type="button" data-lgo>看改前 → 改後</button></div>';
     box.innerHTML=h;
     var l2=box.querySelector("[data-l2]"), lay=box.querySelector("[data-lay]"), lin=box.querySelector("[data-lin]");
     function layers(pre){
@@ -990,27 +993,31 @@ var CodeIn = (function () {
       locs.forEach(function(x){ var k=String(x.loc).toUpperCase(); if (k.indexOf(pre)===0 && o.indexOf(x.loc)<0 && !/^[A-Z]/.test(k.slice(pre.length)) && k.length>pre.length && o.length<20) o.push(x.loc); });
       return o;
     }
-    function show(title, list, cls){
-      l2.textContent=title; l2.hidden=false; lay.hidden=false; lay.className="mvgrid "+(cls||"c5");
-      lay.innerHTML=list.map(function(v){ return '<button type="button" data-v="'+esc(v.v)+'"'+(v.next?' data-next="1"':'')+'>'+esc(v.l)+(has[v.v]?'<small>'+has[v.v]+' 支</small>':'')+'</button>'; }).join("");
+    function bt(v){ return '<button type="button" data-v="'+esc(v.v)+'"'+(v.next?' data-next="1"':'')+'>'+esc(v.l)+(has[v.v]?'<small>'+has[v.v]+' 支</small>':'')+'</button>'; }
+    function show(title, list, cls, groups){
+      l2.textContent=title; l2.hidden=false; lay.hidden=false; lay.className=groups?"mvgrp":"mvgrid "+(cls||"c5");
+      lay.innerHTML=groups?groups.map(function(g){ return '<div class="mvstep">'+esc(g.g)+'</div><div class="mvgrid c3">'+g.l.map(function(x){ return bt({v:x.loc, l:x.loc}); }).join("")+'</div>'; }).join(""):list.map(bt).join("");
       Array.prototype.forEach.call(lay.querySelectorAll("button"),function(b){ b.onclick=function(){ if (b.dataset.next) { cab(b.dataset.v); return; } Array.prototype.forEach.call(lay.querySelectorAll("button"),function(x){ x.setAttribute("aria-pressed", x===b); }); pick(b.dataset.v); }; });
     }
     function cab(c){
       Array.prototype.forEach.call(box.querySelectorAll("[data-cab]"),function(x){ x.setAttribute("aria-pressed", x.dataset.cab===c || (c.length===2&&c.charAt(0)==="水"&&x.dataset.cab==="水")); });
       if (c==="水"){
-        var seen={}; locs.forEach(function(x){ var m=/^水([A-Z])/.exec(String(x.loc).toUpperCase()); if(m) seen[m[1]]=1; });
+        var seen={}; (info.water||[]).forEach(function(x){ seen[x]=1; }); locs.forEach(function(x){ var m=/^水([A-Z])/.exec(String(x.loc).toUpperCase()); if(m) seen[m[1]]=1; });
         var ws=MV_CABS.filter(function(x){ return seen[x]; }); if(!ws.length) ws=MV_CABS;
         show("💧 水櫃：哪一櫃？", ws.map(function(x){ return {v:"水"+x, l:"水"+x, next:1}; }));
         return;
       }
       if (c==="中"){
-        var zh=MV_ZH.slice(); locs.forEach(function(x){ if(!/^水?[A-Z]/i.test(x.loc) && zh.indexOf(x.loc)<0 && zh.length<24) zh.push(x.loc); });
-        show("中文的位置", zh.map(function(x){ return {v:x, l:x}; }), "c3");
+        if (info.places&&info.places.length){ show("棧板、水棧、其他（全部的位置）", null, "", info.places); return; }
+        var zh=MV_ZH.slice(); locs.forEach(function(x){ if(!/^水?[A-Z]/i.test(x.loc) && zh.indexOf(x.loc)<0) zh.push(x.loc); });
+        show("棧板、水棧、其他", zh.map(function(x){ return {v:x, l:x}; }), "c3");
         return;
       }
       show("② "+c+" 櫃：第幾層？", layers(c).map(function(x){ return {v:x, l:x}; }));
     }
     Array.prototype.forEach.call(box.querySelectorAll("[data-cab]"),function(b){ b.onclick=function(){ cab(b.dataset.cab); }; });
+    Array.prototype.forEach.call(box.querySelectorAll("[data-pl]"),function(b){ b.onclick=function(){ Array.prototype.forEach.call(box.querySelectorAll("[data-pl],[data-lay] button"),function(x){ x.setAttribute("aria-pressed", x===b); }); pick(b.dataset.pl); }; });
+    box.querySelector("[data-own]").onclick=function(){ var ob=box.querySelector("[data-ownbox]"); ob.hidden=false; try{ lin.focus(); }catch(e){} };
     box.querySelector("[data-lgo]").onclick=function(){ var v=lin.value.trim(); if(!v){ lin.focus(); return; } pick(v); };
     lin.onkeydown=function(e){ if (e.key==="Enter"){ e.preventDefault(); box.querySelector("[data-lgo]").click(); } };
   }
@@ -1019,12 +1026,14 @@ var CodeIn = (function () {
     var key=mvLocKey(raw);
     if (!key || key.length>20 || /\|/.test(key)){ setHint("❌ 位置不能是空的、最多 20 個字、不能有「|」", true); return; }
     if (/^\d{4,6}$/.test(key)){ setHint("❌ 「"+key+"」看起來是 CODE，不是位置", true); return; }
-    var hit=(info.locs||[]).filter(function(x){ return mvLocKey(x.loc)===key; })[0], loc=hit?hit.loc:key;
+    var hit=(info.locs||[]).filter(function(x){ return mvLocKey(x.loc)===key; })[0], pl=null;
+    if (!hit) (info.places||[]).forEach(function(g){ g.l.forEach(function(x){ if (!pl && mvLocKey(x.loc)===key) pl=x; }); });
+    var loc=hit?hit.loc:pl?pl.loc:key;
     var todo=items.filter(function(x){ return mvLocKey(x.old)!==key; });
     if (!todo.length){ setHint(items.length===1?items[0].code+" 本來就是「"+loc+"」，不用改 👍":"勾的都已經是「"+loc+"」了"); box.innerHTML=""; return; }
     var pairs=todo.map(function(x){ return [x.old||"（空的）", loc, x.code]; });
-    var warn=hit?"「"+loc+"」現在有 "+hit.n+" 支藥":"⚠️ 試算表裡還沒有別的藥放「"+loc+"」：確定是這個位置嗎？（打錯字就重選）";
-    mvConfirm(box, todo.length===1?todo[0].code+"　小藥庫位置":"這 "+todo.length+" 支的小藥庫位置", pairs, warn, hit?"":"warn", function(btn){
+    var warn=hit?"「"+loc+"」現在有 "+hit.n+" 支藥":pl?"「"+loc+"」是平面圖上的位置（現在還沒有藥放這裡）":"⚠️ 試算表裡還沒有別的藥放「"+loc+"」：確定是這個位置嗎？（打錯字就重選）";
+    mvConfirm(box, todo.length===1?todo[0].code+"　小藥庫位置":"這 "+todo.length+" 支的小藥庫位置", pairs, warn, hit||pl?"":"warn", function(btn){
       call("appMove",[T, {kind:"loc", items:todo.map(function(x){ return {code:x.code, old:x.old||""}; }), to:loc, allowNew:!hit}],function(res){
         if (!res||res.err||res.confirm){ btn.disabled=false; setHint("❌ 沒有改："+(res&&res.err||"請再確認一次"), true); return; }
         done(res);
