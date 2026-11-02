@@ -810,6 +810,7 @@ var CodeIn = (function () {
         h+='<input id="e_'+k+'" value="'+esc(cur)+'" list="l_'+k+'"><datalist id="l_'+k+'">'+FORMS.map(function(x){ return '<option value="'+esc(x)+'">'; }).join("")+'</datalist>';
       } else {
         h+='<input id="e_'+k+'" value="'+esc(cur)+'"'+(f.cap?' autocapitalize="characters"':'')+(f.url?' inputmode="url"':'')+'>';
+        if (k==="loc") h+='<button type="button" class="mvgo2" id="e_locpick">📍 選位置（櫃、全部的位置、看平面圖）</button><div class="mvp e-locp" id="e_locp" hidden></div>';
       }
       h+='<span class="was">'+(f.nl?'按 Enter 換行＝卡片上跳行　':'')+(f.hint?esc(f.hint)+'　':'')+'原本：'+(cur?esc((cur.length>60?cur.slice(0,60)+"…":cur).replace(/\n/g," ⏎ ")):"（空的）")+'</span></div>';
     });
@@ -818,6 +819,17 @@ var CodeIn = (function () {
     out.innerHTML=h;
     $("ecancel").onclick=function(){ renderCard(r, backTo); };
     $("e_mv").onclick=function(){ renderMove(r, backTo); };
+    $("e_locpick").onclick=function(){
+      var bx=$("e_locp"), bt=this;
+      if (!bx.hidden){ bx.hidden=true; return; }
+      bt.disabled=true; bt.textContent="📍 讀全部的位置…";
+      call("appMoveInfo",[T, r.code],function(info){
+        bt.disabled=false; bt.textContent="📍 選位置（櫃、全部的位置、看平面圖）";
+        if (!info||info.err){ setHint("❌ "+(info&&info.err||"讀不到位置"), true); return; }
+        bx.hidden=false;
+        mvLocPicker(bx, info, function(v){ var el=$("e_loc"), key=mvLocKey(v), nm=key; (info.locs||[]).concat([].concat.apply([], (info.places||[]).map(function(g){ return g.l; }))).forEach(function(x){ if (mvLocKey(x.loc)===key) nm=x.loc; }); el.value=nm; bx.hidden=true; setHint("📍 選好了「"+nm+"」：按「💾 存」才會寫進去"); try{ el.focus(); }catch(e){} });
+      }, function(e){ bt.disabled=false; bt.textContent="📍 選位置（櫃、全部的位置、看平面圖）"; var m=String(e&&e.message||e); setHint("❌ "+(/看不懂的請求/.test(m)?"網頁專案（Apps Script）的 01、02 還沒換成第 63 批以後":m), true); });
+    };
     $("e_picbtn").onclick=function(){ $("e_picfile").click(); };
     $("e_picfile").onchange=function(e){ var file=e.target.files&&e.target.files[0]; e.target.value=""; if(file) uploadPic(file); };
     function uploadPic(file){
@@ -906,6 +918,8 @@ var CodeIn = (function () {
     h+='<div class="t">📍 改位置：每一次都先給您看「改前 → 改後」，按「確定」才改</div>';
     h+='<section class="mvs"><h3>小藥庫位置（試算表）</h3><div class="mvnow"><span>現在</span><b id="mv_locnow">'+esc(info.loc||"（空的）")+'</b></div>';
     h+='<div id="mv_lp"></div><div id="mv_lconf"></div></section>';
+    var mp=info.map;
+    if (mp) h+='<section class="mvs"><h3>平面圖（開發者設定）</h3><div class="mvcellrow"><b>'+esc(mp.spots&&mp.spots.length?"照公藥區的格子（"+mp.spots.join("、")+"）":mp.none?"沒有平面圖（開發者設的）":mp.now?mp.now+"（開發者設的）":"自動（跟著小藥庫位置走）")+'</b><button type="button" id="mv_map">🗺 改平面圖</button></div></section>';
     h+='<section class="mvs"><h3>公藥區的格子（平面圖上的位置）</h3>';
     if (!info.cellOk) h+='<p class="mvnote">這支藥的 CODE 不是 5 位數字，平面圖的檔名認不得（公藥區的格子不能從這裡改）</p>';
     else if (info.cellErr) h+='<p class="mvnote">⚠️ '+esc(info.cellErr)+'</p>';
@@ -921,6 +935,7 @@ var CodeIn = (function () {
     h+='<div class="actions"><button type="button" class="quiet" id="mv_back">← 回卡片</button></div></div></article>';
     out.innerHTML=h;
     $("mv_back").onclick=function(){ renderCard(FULL[r.code]||r, backTo); };
+    if ($("mv_map")) $("mv_map").onclick=function(){ renderEdit(FULL[r.code]||r, backTo); setTimeout(function(){ var m=$("e_map"); if (m) try{ m.scrollIntoView({block:"center"}); m.focus(); }catch(e){} }, 1500); };
     if (done && done.undo) $("mv_undo").onclick=function(){ this.disabled=true; done.undo(); };
     mvLocPicker($("mv_lp"), info, function(loc){ mvLocConfirm($("mv_lconf"), [{code:r.code, old:info.loc||"", brand:r.brand}], loc, info, function(res){ mvAfter(r, backTo, res, "loc"); }); });
     function pickCell(op, fromId){
@@ -1017,9 +1032,45 @@ var CodeIn = (function () {
     }
     Array.prototype.forEach.call(box.querySelectorAll("[data-cab]"),function(b){ b.onclick=function(){ cab(b.dataset.cab); }; });
     Array.prototype.forEach.call(box.querySelectorAll("[data-pl]"),function(b){ b.onclick=function(){ Array.prototype.forEach.call(box.querySelectorAll("[data-pl],[data-lay] button"),function(x){ x.setAttribute("aria-pressed", x===b); }); pick(b.dataset.pl); }; });
+    mvPrevOn(box, info);
     box.querySelector("[data-own]").onclick=function(){ var ob=box.querySelector("[data-ownbox]"); ob.hidden=false; try{ lin.focus(); }catch(e){} };
     box.querySelector("[data-lgo]").onclick=function(){ var v=lin.value.trim(); if(!v){ lin.focus(); return; } pick(v); };
     lin.onkeydown=function(e){ if (e.key==="Enter"){ e.preventDefault(); box.querySelector("[data-lgo]").click(); } };
+  }
+  var MVPV=null, MVPV_SC=0;
+  function mvPrevKey(b){
+    var v=b.dataset.pl||b.dataset.v||(b.dataset.cab&&/^[A-Z]$/.test(b.dataset.cab)?b.dataset.cab:"")||"";
+    var m=/^(水?[A-Z])\d/.exec(v); return m?m[1]:v;
+  }
+  function mvPrevHide(){ if (MVPV) MVPV.hidden=true; }
+  function mvPrevShow(b, info){
+    var k=mvPrevKey(b), u=info.pmap&&info.pmap[k];
+    if (!u){ mvPrevHide(); return; }
+    if (!MVPV){ MVPV=document.createElement("div"); MVPV.className="mvpv"; MVPV.setAttribute("aria-hidden","true"); MVPV.innerHTML='<img alt=""><b></b>'; document.body.appendChild(MVPV); }
+    var im=MVPV.querySelector("img"); if (im.getAttribute("src")!==u) im.src=u;
+    MVPV.querySelector("b").textContent=k+" 的平面圖";
+    MVPV.hidden=false; MVPV._b=b; MVPV._i=info;
+    var r=b.getBoundingClientRect(), W=Math.min(340, innerWidth-24), H=W*0.75+30;
+    var z=parseFloat(getComputedStyle(document.body).zoom)||1;
+    MVPV.style.width=(W/z)+"px";
+    var x=r.right+10; if (x+W>innerWidth-8) x=r.left-W-10; if (x<8) x=Math.max(8, Math.min(innerWidth-W-8, r.left+r.width/2-W/2));
+    var y=r.top+r.height/2-H/2; if (x>=r.left-W-10 && x<=r.right && (r.left-W-10<8 && r.right+10+W>innerWidth-8)) y=r.top-H-10<8?r.bottom+10:r.top-H-10;
+    y=Math.max(8, Math.min(innerHeight-H-8, y));
+    MVPV.style.left=(x/z)+"px"; MVPV.style.top=(y/z)+"px";
+  }
+  function mvPrevOn(box, info){
+    if (!info.pmap) return;
+    var btn=function(e){ var b=e.target&&e.target.closest?e.target.closest("button"):null; return b&&box.contains(b)&&(b.dataset.pl||b.dataset.v||b.dataset.cab)?b:null; };
+    box.addEventListener("mouseover", function(e){ var b=btn(e); if (b) mvPrevShow(b, info); });
+    box.addEventListener("mouseout", function(e){ var b=btn(e); if (b && !(e.relatedTarget&&b.contains(e.relatedTarget))) mvPrevHide(); });
+    box.addEventListener("focusin", function(e){ var b=btn(e); if (b) mvPrevShow(b, info); });
+    box.addEventListener("focusout", mvPrevHide);
+    var tm=null, held=false;
+    box.addEventListener("touchstart", function(e){ var b=btn(e); held=false; clearTimeout(tm); if (!b) return; tm=setTimeout(function(){ held=true; mvPrevShow(b, info); }, 450); }, { passive:true });
+    box.addEventListener("touchmove", function(){ clearTimeout(tm); }, { passive:true });
+    box.addEventListener("touchend", function(e){ clearTimeout(tm); if (held){ mvPrevHide(); e.preventDefault(); held=false; } });
+    box.addEventListener("contextmenu", function(e){ if (btn(e)) e.preventDefault(); });
+    if (!MVPV_SC){ MVPV_SC=1; window.addEventListener("scroll", function(){ if (MVPV && !MVPV.hidden){ if (MVPV._b && MVPV._b.isConnected) mvPrevShow(MVPV._b, MVPV._i); else mvPrevHide(); } }, { passive:true }); }
   }
   function mvLocKey(v){ return String(v||"").replace(/[！-～]/g,function(ch){ return String.fromCharCode(ch.charCodeAt(0)-65248); }).toUpperCase().replace(/\s+/g,""); }
   function mvLocConfirm(box, items, raw, info, done){
