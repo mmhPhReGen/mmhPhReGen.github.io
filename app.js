@@ -152,7 +152,7 @@ var CodeIn = (function () {
       .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json().catch(function(){ throw new Error("後端回的不是補藥神器的格式"); }); })
       .then(function(j){ clearTimeout(tm); if (j&&j.ok===1&&bd.k&&TK===bd.k) TK=""; return j; }, function(e){ clearTimeout(tm); throw (e&&e.name==="AbortError")?new Error("等太久沒回應"):e; });
   }
-  var SAFE={appInfo:1, appHome:1, appSearch:1, appSame:1, appPhoto:1, appVoice:1, appEditInfo:1, appAll:1};
+  var SAFE={appInfo:1, appHome:1, appSearch:1, appSame:1, appPhoto:1, appVoice:1, appEditInfo:1, appAll:1, appMoveInfo:1, appMoveList:1};
   var TRIES=3, WAITS=[700,1600], LIMIT_MS=40000, LIMIT_PHOTO=90000;
   function snip(j){ var s=""; try{ s=JSON.stringify(j); }catch(e){} return String(s===undefined?"":s).replace(/\s+/g," ").slice(0,60); }
   function call(fn, args, ok, bad, opt){
@@ -693,7 +693,7 @@ var CodeIn = (function () {
     h+='<div class="cbody">'+(pn?'<div class="pnl'+(hp&&!hf&&!hasNote?' solo':'')+'" style="--ga:'+ga+';--gc:'+gc+'">'+pn+'</div>':'')+lr+'</div>';
     var acts=[];
     if (backTo&&(backTo.length>1||(LAST&&LAST.photo&&LAST.rows===backTo))) acts.push('<button type="button" class="quiet" id="back">← 回清單</button>');
-    if (DEV) acts.push('<button type="button" class="edit" id="edit">✏️ 修改</button>');
+    if (DEV) acts.push('<button type="button" class="edit" id="edit">✏️ 修改</button>','<button type="button" class="edit" id="mvbtn">📍 改位置</button>');
     if (acts.length) h+='<div class="actions">'+acts.join("")+'</div>';
     h+='<div id="same">'+(SAME[r.code]?sameHtml(SAME[r.code]):'')+'</div>';
     h+='</article>';
@@ -703,6 +703,7 @@ var CodeIn = (function () {
     if ($("back")) $("back").onclick=function(){ if (LAST&&LAST.photo&&LAST.rows===backTo) renderPhoto(LAST.photo); else renderList(backTo); };
     if (!SAME[r.code] && !NET.off) call("appSame",[T, r.code],function(res){ if(!res||res.err) return; SAME[r.code]=res; var el=$("same"); if(el&&out.contains(el)&&el.closest("article")&&el.closest("article").getAttribute("data-code")===String(r.code)) el.innerHTML=sameHtml(res); }, function(){});
     if ($("edit")) $("edit").onclick=function(){ renderEdit(r, backTo); };
+    if ($("mvbtn")) $("mvbtn").onclick=function(){ renderMove(r, backTo); };
     fitCard();
     window.scrollTo({top:0});
   }
@@ -813,8 +814,10 @@ var CodeIn = (function () {
       h+='<span class="was">'+(f.nl?'按 Enter 換行＝卡片上跳行　':'')+(f.hint?esc(f.hint)+'　':'')+'原本：'+(cur?esc((cur.length>60?cur.slice(0,60)+"…":cur).replace(/\n/g," ⏎ ")):"（空的）")+'</span></div>';
     });
     h+='<div class="actions"><button type="button" class="quiet" id="ecancel">取消</button><button type="button" class="pri" id="esave">💾 存</button></div></div></article>';
+    h=h.replace('<div class="edit">','<div class="edit"><button type="button" class="mvgo" id="e_mv">📍 改位置（公藥區的格子、小藥庫位置）→ 選格子、選櫃→選層，比打字不容易出錯</button>');
     out.innerHTML=h;
     $("ecancel").onclick=function(){ renderCard(r, backTo); };
+    $("e_mv").onclick=function(){ renderMove(r, backTo); };
     $("e_picbtn").onclick=function(){ $("e_picfile").click(); };
     $("e_picfile").onchange=function(e){ var file=e.target.files&&e.target.files[0]; e.target.value=""; if(file) uploadPic(file); };
     function uploadPic(file){
@@ -884,6 +887,195 @@ var CodeIn = (function () {
     };
     window.scrollTo({top:0});
   }
+  var MV_CABS="ABCDEFGHIJKLMNOPQRST".split(""), MV_ZH=["棧左","棧中","棧右"];
+  function mvLabel(c){ return c ? c.label : ""; }
+  function renderMove(r, backTo, done){
+    if (NET.off){ setHint("📴 離線中：改位置要有網路，網路好了再改", true); return; }
+    out.innerHTML='<article class="card"><div class="head"><div class="t"><div class="code mono">'+esc(r.code)+'</div><div class="brand">'+esc(r.brand)+'</div></div></div><div class="edit"><div class="t">📍 讀現在的位置…</div></div></article>';
+    window.scrollTo({top:0});
+    call("appMoveInfo",[T, r.code],function(info){
+      if (!info || info.err){ setHint("❌ "+(info&&info.err||"讀不到現在的位置"), true); renderCard(r, backTo); return; }
+      buildMove(r, backTo, info, done);
+    }, function(e){ var m=String(e&&e.message||e); setHint("❌ "+(/看不懂的請求/.test(m)?"網頁專案（Apps Script）的 01、02 還沒換成第 63 批，「📍 改位置」先不能用":m), true); renderCard(r, backTo); });
+  }
+  function buildMove(r, backTo, info, done){
+    var cells=info.cells||[], mine=cells.filter(function(c){ return c.codes.indexOf(r.code)>=0; });
+    var h='<article class="card"><div class="head"><div class="t"><div class="code mono">'+esc(r.code)+'</div><div class="brand">'+esc(r.brand)+'</div>'+(r.chName?'<div class="zh">'+esc(r.chName)+'</div>':'')+'</div></div>';
+    h+='<div class="edit mvp">';
+    if (done) h+='<div class="mvdone" id="mv_done"><div>'+done.html+'</div>'+(done.undo?'<button type="button" id="mv_undo">↩️ 復原</button>':'')+'</div>';
+    h+='<div class="t">📍 改位置：每一次都先給您看「改前 → 改後」，按「確定」才改</div>';
+    h+='<section class="mvs"><h3>小藥庫位置（試算表）</h3><div class="mvnow"><span>現在</span><b id="mv_locnow">'+esc(info.loc||"（空的）")+'</b></div>';
+    h+='<div id="mv_lp"></div><div id="mv_lconf"></div></section>';
+    h+='<section class="mvs"><h3>公藥區的格子（平面圖上的位置）</h3>';
+    if (!info.cellOk) h+='<p class="mvnote">這支藥的 CODE 不是 5 位數字，平面圖的檔名認不得（公藥區的格子不能從這裡改）</p>';
+    else if (info.cellErr) h+='<p class="mvnote">⚠️ '+esc(info.cellErr)+'</p>';
+    else {
+      h+=mine.length?mine.map(function(c){ return '<div class="mvcellrow"><b>'+esc(c.label)+'</b><button type="button" class="pri" data-mvswap="'+esc(c.id)+'">換掉</button><button type="button" class="warn" data-mvdel="'+esc(c.id)+'">拿掉</button></div>'; }).join(""):'<p class="mvnote">還沒有放在公藥區的任何一格</p>';
+      h+='<div class="mvbar"><button type="button" id="mv_add">＋加一格</button></div>';
+    }
+    h+='<div id="mv_cp"></div><div id="mv_cconf"></div></section>';
+    h+='<section class="mvs"><h3>📦 很多支一起搬</h3><p class="mvnote">選一格，或打一個小藥庫位置 → 勾要搬的 → 選搬到哪</p>';
+    h+='<div class="mvchips">'+cells.map(function(c){ return '<button type="button" data-mvbsrc="'+esc(c.id)+'">'+esc(c.label)+'</button>'; }).join("")+'</div>';
+    h+='<div class="mvtype"><input id="mv_bloc" placeholder="小藥庫位置，例：C2、水A1、棧左" autocapitalize="characters"><button type="button" id="mv_bgo">列出來</button></div>';
+    h+='<div id="mv_b"></div></section>';
+    h+='<div class="actions"><button type="button" class="quiet" id="mv_back">← 回卡片</button></div></div></article>';
+    out.innerHTML=h;
+    $("mv_back").onclick=function(){ renderCard(FULL[r.code]||r, backTo); };
+    if (done && done.undo) $("mv_undo").onclick=function(){ this.disabled=true; done.undo(); };
+    mvLocPicker($("mv_lp"), info, function(loc){ mvLocConfirm($("mv_lconf"), [{code:r.code, old:info.loc||"", brand:r.brand}], loc, info, function(res){ mvAfter(r, backTo, res, "loc"); }); });
+    function pickCell(op, fromId){
+      var pool=cells.filter(function(c){ return c.id!==fromId && c.codes.indexOf(r.code)<0; });
+      mvGallery($("mv_cp"), pool, (op==="a"?"＋ "+r.code+" 要多放哪一格？":"換到哪一格？")+"（已經有 "+r.code+" 的格子不列出來）", function(to){ cellConfirm(fromId, to.id); });
+    }
+    function cellConfirm(fromId, toId){
+      var from=cells.filter(function(c){ return c.id===fromId; })[0], to=cells.filter(function(c){ return c.id===toId; })[0];
+      var bef=mine.map(mvLabel), aft=mine.map(mvLabel).filter(function(x){ return !from || x!==from.label; });
+      if (to && aft.indexOf(to.label)<0) aft.push(to.label);
+      var how=[]; if (from) how.push("「"+from.label+"」的檔名拿掉 "+r.code); if (to) how.push("「"+to.label+"」的檔名加上 "+r.code);
+      mvConfirm($("mv_cconf"), r.code+"　公藥區的格子", [[bef.join("、")||"（沒有放在公藥區）", aft.join("、")||"（沒有放在公藥區）"]], "雲端硬碟會這樣改："+how.join("；"), "", function(btn){
+        call("appMove",[T, {kind:"cell", codes:[r.code], from:fromId||"", to:toId||""}],function(res){ if(!res||res.err){ btn.disabled=false; setHint("❌ 沒有改："+(res&&res.err||"?"), true); return; } mvAfter(r, backTo, res, "cell"); }, function(e){ btn.disabled=false; setHint("❌ "+(e&&e.message||e), true); });
+      });
+    }
+    Array.prototype.forEach.call(out.querySelectorAll("[data-mvswap]"),function(b){ b.onclick=function(){ pickCell("s", b.dataset.mvswap); }; });
+    Array.prototype.forEach.call(out.querySelectorAll("[data-mvdel]"),function(b){ b.onclick=function(){ $("mv_cp").innerHTML=""; cellConfirm(b.dataset.mvdel, ""); }; });
+    if ($("mv_add")) $("mv_add").onclick=function(){ pickCell("a", ""); };
+    function bList(kind, val){
+      $("mv_b").innerHTML='<p class="mvnote">讀這裡的藥…</p>';
+      call("appMoveList",[T, kind, val],function(res){
+        if (!res||res.err){ $("mv_b").innerHTML='<p class="mvnote">❌ '+esc(res&&res.err||"讀不到")+'</p>'; return; }
+        var rows=res.rows||[];
+        if (!rows.length){ $("mv_b").innerHTML='<p class="mvnote">「'+esc(res.title)+'」現在沒有藥</p>'; return; }
+        var hh='<div class="mvbt"><b>'+esc(res.title)+'</b>：勾要搬的</div><div class="mvlist">'+rows.map(function(x,i){ return '<label class="mvck"><input type="checkbox" data-mvi="'+i+'"><span class="mono">'+esc(x.code)+'</span><span>'+esc(x.brand||x.chName||"")+'</span><span class="mvl">'+esc(x.loc||"")+'</span></label>'; }).join("")+'</div>';
+        hh+='<div class="mvbar"><button type="button" id="mv_ball">全選</button><button type="button" id="mv_bnone">全不選</button><button type="button" class="pri" id="mv_bnext">下一步：搬到哪（<span id="mv_bn">0</span> 支）</button></div><div id="mv_bt"></div><div id="mv_bconf"></div>';
+        $("mv_b").innerHTML=hh;
+        var boxes=Array.prototype.slice.call($("mv_b").querySelectorAll("[data-mvi]"));
+        function sel(){ return boxes.filter(function(b){ return b.checked; }).map(function(b){ return rows[+b.dataset.mvi]; }); }
+        function upd(){ $("mv_bn").textContent=sel().length; $("mv_bt").innerHTML=""; $("mv_bconf").innerHTML=""; }
+        boxes.forEach(function(b){ b.onchange=upd; });
+        $("mv_ball").onclick=function(){ boxes.forEach(function(b){ b.checked=true; }); upd(); };
+        $("mv_bnone").onclick=function(){ boxes.forEach(function(b){ b.checked=false; }); upd(); };
+        $("mv_bnext").onclick=function(){
+          var s=sel(); if (!s.length){ setHint("還沒有勾任何一支", true); return; }
+          var codes=s.map(function(x){ return x.code; });
+          if (kind==="c"){
+            var from=cells.filter(function(c){ return c.id===val; })[0];
+            mvGallery($("mv_bt"), cells.filter(function(c){ return c.id!==val; }), "這 "+s.length+" 支從「"+(from?from.label:"")+"」搬到哪一格？", function(to){
+              var had=codes.filter(function(c){ return to.codes.indexOf(c)>=0; });
+              mvConfirm($("mv_bconf"), "這 "+s.length+" 支："+codes.join("、"), [[from?from.label:"", to.label]], "雲端硬碟會這樣改：「"+(from?from.label:"")+"」的檔名拿掉這幾個代碼；「"+to.label+"」的檔名加上"+(had.length?"（"+had.join("、")+" 本來就在，只從舊的那一格拿掉）":""), "", function(btn){
+                call("appMove",[T, {kind:"cell", codes:codes, from:val, to:to.id}],function(res2){ if(!res2||res2.err){ btn.disabled=false; setHint("❌ 沒有改："+(res2&&res2.err||"?"), true); return; } mvAfter(r, backTo, res2, "cell", codes); }, function(e){ btn.disabled=false; setHint("❌ "+(e&&e.message||e), true); });
+              });
+            });
+          } else {
+            $("mv_bt").innerHTML='<div class="mvbt">搬到小藥庫哪裡？</div><div id="mv_blp"></div>';
+            mvLocPicker($("mv_blp"), info, function(loc){ mvLocConfirm($("mv_bconf"), s.map(function(x){ return {code:x.code, old:x.loc, brand:x.brand}; }), loc, info, function(res2){ mvAfter(r, backTo, res2, "loc", codes); }); });
+          }
+        };
+      });
+    }
+    Array.prototype.forEach.call(out.querySelectorAll("[data-mvbsrc]"),function(b){ b.onclick=function(){ Array.prototype.forEach.call(out.querySelectorAll("[data-mvbsrc]"),function(x){ x.setAttribute("aria-pressed", x===b); }); bList("c", b.dataset.mvbsrc); }; });
+    $("mv_bgo").onclick=function(){ var v=$("mv_bloc").value.trim(); if(!v){ $("mv_bloc").focus(); return; } bList("l", v); };
+    $("mv_bloc").onkeydown=function(e){ if (e.key==="Enter"){ e.preventDefault(); $("mv_bgo").click(); } };
+    window.scrollTo({top:0});
+  }
+  function mvLocPicker(box, info, pick){
+    var locs=info.locs||[], has={}; locs.forEach(function(x){ has[x.loc]=x.n; });
+    var h='<div class="mvstep">① 選櫃</div><div class="mvgrid c5">'+MV_CABS.map(function(c){ return '<button type="button" data-cab="'+c+'">'+c+'</button>'; }).join("")+'</div>'
+      +'<div class="mvgrid c2"><button type="button" data-cab="水">💧 水櫃</button><button type="button" data-cab="中">中文的（棧板…）</button></div>'
+      +'<div class="mvstep" data-l2 hidden></div><div class="mvgrid c5" data-lay hidden></div>'
+      +'<div class="mvtype"><input placeholder="或直接打：C2、水A1、棧左" autocapitalize="characters" data-lin><button type="button" data-lgo>看改前 → 改後</button></div>';
+    box.innerHTML=h;
+    var l2=box.querySelector("[data-l2]"), lay=box.querySelector("[data-lay]"), lin=box.querySelector("[data-lin]");
+    function layers(pre){
+      var o=["1","2","3","4","5"].map(function(n){ return pre+n; });
+      locs.forEach(function(x){ var k=String(x.loc).toUpperCase(); if (k.indexOf(pre)===0 && o.indexOf(x.loc)<0 && !/^[A-Z]/.test(k.slice(pre.length)) && k.length>pre.length && o.length<20) o.push(x.loc); });
+      return o;
+    }
+    function show(title, list, cls){
+      l2.textContent=title; l2.hidden=false; lay.hidden=false; lay.className="mvgrid "+(cls||"c5");
+      lay.innerHTML=list.map(function(v){ return '<button type="button" data-v="'+esc(v.v)+'"'+(v.next?' data-next="1"':'')+'>'+esc(v.l)+(has[v.v]?'<small>'+has[v.v]+' 支</small>':'')+'</button>'; }).join("");
+      Array.prototype.forEach.call(lay.querySelectorAll("button"),function(b){ b.onclick=function(){ if (b.dataset.next) { cab(b.dataset.v); return; } Array.prototype.forEach.call(lay.querySelectorAll("button"),function(x){ x.setAttribute("aria-pressed", x===b); }); pick(b.dataset.v); }; });
+    }
+    function cab(c){
+      Array.prototype.forEach.call(box.querySelectorAll("[data-cab]"),function(x){ x.setAttribute("aria-pressed", x.dataset.cab===c || (c.length===2&&c.charAt(0)==="水"&&x.dataset.cab==="水")); });
+      if (c==="水"){
+        var seen={}; locs.forEach(function(x){ var m=/^水([A-Z])/.exec(String(x.loc).toUpperCase()); if(m) seen[m[1]]=1; });
+        var ws=MV_CABS.filter(function(x){ return seen[x]; }); if(!ws.length) ws=MV_CABS;
+        show("💧 水櫃：哪一櫃？", ws.map(function(x){ return {v:"水"+x, l:"水"+x, next:1}; }));
+        return;
+      }
+      if (c==="中"){
+        var zh=MV_ZH.slice(); locs.forEach(function(x){ if(!/^水?[A-Z]/i.test(x.loc) && zh.indexOf(x.loc)<0 && zh.length<24) zh.push(x.loc); });
+        show("中文的位置", zh.map(function(x){ return {v:x, l:x}; }), "c3");
+        return;
+      }
+      show("② "+c+" 櫃：第幾層？", layers(c).map(function(x){ return {v:x, l:x}; }));
+    }
+    Array.prototype.forEach.call(box.querySelectorAll("[data-cab]"),function(b){ b.onclick=function(){ cab(b.dataset.cab); }; });
+    box.querySelector("[data-lgo]").onclick=function(){ var v=lin.value.trim(); if(!v){ lin.focus(); return; } pick(v); };
+    lin.onkeydown=function(e){ if (e.key==="Enter"){ e.preventDefault(); box.querySelector("[data-lgo]").click(); } };
+  }
+  function mvLocKey(v){ return String(v||"").replace(/[！-～]/g,function(ch){ return String.fromCharCode(ch.charCodeAt(0)-65248); }).toUpperCase().replace(/\s+/g,""); }
+  function mvLocConfirm(box, items, raw, info, done){
+    var key=mvLocKey(raw);
+    if (!key || key.length>20 || /\|/.test(key)){ setHint("❌ 位置不能是空的、最多 20 個字、不能有「|」", true); return; }
+    if (/^\d{4,6}$/.test(key)){ setHint("❌ 「"+key+"」看起來是 CODE，不是位置", true); return; }
+    var hit=(info.locs||[]).filter(function(x){ return mvLocKey(x.loc)===key; })[0], loc=hit?hit.loc:key;
+    var todo=items.filter(function(x){ return mvLocKey(x.old)!==key; });
+    if (!todo.length){ setHint(items.length===1?items[0].code+" 本來就是「"+loc+"」，不用改 👍":"勾的都已經是「"+loc+"」了"); box.innerHTML=""; return; }
+    var pairs=todo.map(function(x){ return [x.old||"（空的）", loc, x.code]; });
+    var warn=hit?"「"+loc+"」現在有 "+hit.n+" 支藥":"⚠️ 試算表裡還沒有別的藥放「"+loc+"」：確定是這個位置嗎？（打錯字就重選）";
+    mvConfirm(box, todo.length===1?todo[0].code+"　小藥庫位置":"這 "+todo.length+" 支的小藥庫位置", pairs, warn, hit?"":"warn", function(btn){
+      call("appMove",[T, {kind:"loc", items:todo.map(function(x){ return {code:x.code, old:x.old||""}; }), to:loc, allowNew:!hit}],function(res){
+        if (!res||res.err||res.confirm){ btn.disabled=false; setHint("❌ 沒有改："+(res&&res.err||"請再確認一次"), true); return; }
+        done(res);
+      }, function(e){ btn.disabled=false; setHint("❌ "+(e&&e.message||e), true); });
+    });
+  }
+  function mvConfirm(box, title, pairs, note, noteCls, ok){
+    var h='<div class="mvconf" role="group" aria-label="請確認"><div class="mvct">請確認 📍 '+esc(title)+'</div>';
+    if (pairs.length===1) h+='<div class="mvba"><span class="b">改前：'+esc(pairs[0][0])+'</span><span class="a">改後：'+esc(pairs[0][1])+'</span></div>';
+    else h+='<div class="mvba">'+pairs.slice(0,30).map(function(p){ return '<span class="row">'+(p[2]?'<span class="mono">'+esc(p[2])+'</span>　':'')+esc(p[0])+' → <b>'+esc(p[1])+'</b></span>'; }).join("")+(pairs.length>30?'<span class="row">…還有 '+(pairs.length-30)+' 支</span>':'')+'</div>';
+    if (note) h+='<p class="mvnote '+(noteCls||"")+'">'+esc(note)+'</p>';
+    h+='<div class="mvbar"><button type="button" class="quiet" data-no>取消</button><button type="button" class="pri" data-ok>✅ 確定</button></div></div>';
+    box.innerHTML=h;
+    box.querySelector("[data-no]").onclick=function(){ box.innerHTML=""; };
+    box.querySelector("[data-ok]").onclick=function(){ this.disabled=true; setHint("改…", false, true); ok(this); };
+    try{ box.scrollIntoView({block:"nearest", behavior:"smooth"}); }catch(e){}
+  }
+  function mvGallery(box, pool, title, pick){
+    if (!pool.length){ box.innerHTML='<p class="mvnote">沒有別的格子可以選</p>'; return; }
+    box.innerHTML='<div class="mvbt">'+esc(title)+'</div><div class="mvgal" tabindex="0" aria-label="平面圖，左右滑">'+pool.map(function(c){ return '<figure class="mvcell"><img src="'+esc(c.thumb)+'" alt="'+esc(c.label)+' 的平面圖" loading="lazy"><figcaption><b>'+esc(c.label)+'</b><small>現在 '+c.codes.length+' 支藥</small></figcaption><button type="button" class="pri" data-pick="'+esc(c.id)+'">放這一格</button></figure>'; }).join("")+'</div><p class="mvnote">往左滑看全部 '+pool.length+' 格</p>';
+    Array.prototype.forEach.call(box.querySelectorAll("[data-pick]"),function(b){ b.onclick=function(){
+      Array.prototype.forEach.call(box.querySelectorAll(".mvcell"),function(x){ x.classList.toggle("on", x.contains(b)); });
+      pick(pool.filter(function(c){ return c.id===b.dataset.pick; })[0]);
+    }; });
+    try{ box.scrollIntoView({block:"nearest", behavior:"smooth"}); }catch(e){}
+  }
+  function mvAfter(r, backTo, res, kind, codes){
+    (res.rows||[]).forEach(function(nr){ keepPh(FULL[nr.code]||nr, nr); FULL[nr.code]=nr; swapRow(nr); });
+    HOME=null; homeDrop();
+    var nr=FULL[r.code]||r, html, undo=null;
+    if (kind==="cell"){
+      html='✅ 改好了（雲端硬碟的檔名已經讀回來確認過）<br>'+esc((codes&&codes.length>1?codes.length+" 支":r.code))+'　公藥區：'+esc((res.from||"")+(res.from&&res.to?" → ":"")+(res.to||"")+(res.from&&!res.to?"（拿掉了）":"")+(!res.from&&res.to?"（多放一格）":""));
+      undo=function(){ call("appMoveUndo",[T, res.ops],function(u){ if(!u||u.err){ setHint("❌ 沒有復原："+(u&&u.err||"?"), true); return; } setHint("↩️ 復原好了"+(u.skip&&u.skip.length?"（"+u.skip.join("、")+" 後來又被改過，沒有動）":"")); mvReload(nr, backTo, {html:"↩️ 復原好了：公藥區的格子改回原來的"}); }); };
+    } else {
+      var d=res.done||[];
+      html='✅ 改好了（試算表已經讀回來確認過）<br>'+d.slice(0,20).map(function(x){ return esc(x.code)+'　'+esc(x.before||"（空的）")+' → <b>'+esc(x.after)+'</b>'; }).join("<br>")+(res.skip&&res.skip.length?'<br><small>沒動的：'+esc(res.skip.join("；"))+'</small>':'')+(res.undo?'<br><small>LINE 也可以打「復原 '+esc(res.undo)+'」</small>':'');
+      undo=function(){
+        var groups={}; d.forEach(function(x){ (groups[x.before]=groups[x.before]||[]).push({code:x.code, old:x.after}); });
+        var keys=Object.keys(groups), i=0, bad=[];
+        (function next(){
+          if (i>=keys.length){ if(bad.length) setHint("⚠️ 有幾支沒復原："+bad.join("；"), true); else setHint("↩️ 復原好了"); mvReload(nr, backTo, {html:"↩️ 復原好了：小藥庫位置改回原來的"}); return; }
+          var k=keys[i++];
+          if (!k){ bad.push(groups[k].map(function(x){ return x.code; }).join("、")+"（原本是空的，請用 ✏️ 修改清掉）"); next(); return; }
+          call("appMove",[T, {kind:"loc", items:groups[k], to:k, allowNew:true}],function(u){ if(!u||u.err) bad.push(u&&u.err||"?"); else (u.rows||[]).forEach(function(x){ FULL[x.code]=x; swapRow(x); }); next(); }, function(e){ bad.push(String(e&&e.message||e)); next(); });
+        })();
+      };
+    }
+    setHint(kind==="cell"?"✅ 公藥區的格子改好了":"✅ 小藥庫位置改好了");
+    mvReload(nr, backTo, {html:html, undo:undo});
+  }
+  function mvReload(r, backTo, done){ renderMove(r, backTo, done); }
 
   function show(res, label, kw){
     if (!res || res.err){ setHint("❌ "+(res&&res.err||"查詢失敗"), true); return; }
