@@ -692,16 +692,45 @@ var KB = (function () {
     if (t.hasAttribute("data-off")) offImgFix(t);
   }, true);
   function esc(s){ return String(s===null||s===undefined?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
-  var WR_G=/\[(並|w)\]([\s\S]*?)\[\/\1\]/g;
-  function wrSplit(t){
-    var s=String(t||"").replace(/[\r\n\t]+/g," ").replace(/\|/g,"｜").replace(/^[\s｜]+|[\s｜]+$/g,""), k=s.indexOf("｜");
-    if (k>=0) return [s.slice(0,k).trim(), s.slice(k+1).replace(/｜/g,"").trim()];
-    var cs=Array.from(s), h=Math.ceil(cs.length/2); return [cs.slice(0,h).join(""), cs.slice(h).join("")];
+  var WR_G=/\[(並|w)(?:=([^\]]{1,32}))?\]([\s\S]*?)\[\/\1\]/g;
+  function wrOpt(o){
+    var r={al:"j", n:2, s:64, h:115, k:8, m:30};
+    String(o||"").split(/[-,，、 ]+/).forEach(function(t){
+      if (/^[clrj]$/.test(t)) r.al=t; else if (t==="中"||t==="置中") r.al="c"; else if (t==="左"||t==="靠左") r.al="l"; else if (t==="右"||t==="靠右") r.al="r";
+      else if (/^[2-4]行?$/.test(t)) r.n=+t.charAt(0);
+      else if (t==="小") r.s=50; else if (t==="大") r.s=80; else if (t==="特大") r.s=100; else if (/^s\d{2,3}$/.test(t)) r.s=Math.max(40,Math.min(100,+t.slice(1)));
+      else if (/^h\d{2,3}$/.test(t)) r.h=Math.max(100,Math.min(200,+t.slice(1))); else if (/^k\d{1,2}$/.test(t)) r.k=Math.min(40,+t.slice(1)); else if (/^m\d{1,3}$/.test(t)) r.m=Math.min(120,+t.slice(1));
+    });
+    return r;
+  }
+  function wrSplit(t, n){
+    var s=String(t||"").replace(/[\r\n\t]+/g," ").replace(/\|/g,"｜").replace(/｜{2,}/g,"｜").replace(/^[\s｜]+|[\s｜]+$/g,"");
+    if (s.indexOf("｜")>=0){ var ps=s.split("｜").map(function(x){ return x.trim(); }); if (ps.length>4) ps=ps.slice(0,3).concat([ps.slice(3).join("")]); return ps; }
+    var cs=Array.from(s), out=[], at=0, k=Math.max(2,Math.min(4,n||2));
+    for (var i=0;i<k;i++){ var c=Math.ceil((cs.length-at)/(k-i)); out.push(cs.slice(at,at+c).join("")); at+=c; }
+    return out;
+  }
+  var WR_ALS={j:"text-align:justify;text-align-last:justify", c:"text-align:center", l:"text-align:left", r:"text-align:right"};
+  function escW1(s){
+    var out="", last=0, m; WR_G.lastIndex=0;
+    while ((m=WR_G.exec(s))!==null){
+      var o=wrOpt(m[2]), p=wrSplit(m[3], o.n);
+      out+=esc(s.slice(last,m.index))+'<span class="wr" role="text" aria-label="'+esc(p.join(""))+'" style="font-size:'+(o.s/100)+'em;line-height:'+(o.h/100)+';letter-spacing:'+(o.k/100)+'em;margin:0 '+(o.m/100)+'em">'
+        +p.map(function(x){ return '<span style="'+WR_ALS[o.al]+'">'+(x?esc(x):'&nbsp;')+'</span>'; }).join("")+'</span>';
+      last=m.index+m[0].length;
+    }
+    return out+esc(s.slice(last));
   }
   function escW(s){
-    s=String(s===null||s===undefined?"":s); var out="", last=0, m; WR_G.lastIndex=0;
-    while ((m=WR_G.exec(s))!==null){ var p=wrSplit(m[2]); out+=esc(s.slice(last,m.index))+'<span class="wr" role="text" aria-label="'+esc(p[0]+p[1])+'"><span>'+esc(p[0])+'</span><span>'+(p[1]?esc(p[1]):'&nbsp;')+'</span></span>'; last=m.index+m[0].length; }
-    return out+esc(s.slice(last));
+    s=String(s===null||s===undefined?"":s);
+    var AL=/^(\s*)\[(置中|靠右|靠左|左右對齊|al=[clrj])\]\s*/, ALC={"置中":"center","al=c":"center","靠右":"right","al=r":"right","左右對齊":"justify","al=j":"justify"};
+    var parts=s.split("\n").map(function(l){ var a=AL.exec(l); if (!a) return {h:escW1(l)}; var v=ALC[a[2]]; return {h:escW1(a[1]+l.slice(a[0].length)), b:v?1:0, al:v}; });
+    var out="";
+    parts.forEach(function(p,i){
+      if (i && !(p.b||parts[i-1].b)) out+="\n";
+      out+=p.b?'<span class="wral" style="display:block;text-align:'+p.al+'">'+(p.h||'&nbsp;')+'</span>':p.h;
+    });
+    return out;
   }
   var nbKeep=false;
   function nbHide(){ if (nobox) nobox.hidden=true; }
@@ -996,7 +1025,8 @@ var KB = (function () {
       if (f.nk){
         h+='<select id="e_'+k+'">'+Object.keys(NK).map(function(n){ return '<option value="'+n+'"'+(cur===n?" selected":"")+'>'+esc(NK[n])+'</option>'; }).join("")+'</select>';
       } else if (f.ta){
-        h+='<textarea id="e_'+k+'">'+esc(cur)+'</textarea><button type="button" class="wrbtn" data-wr="e_'+k+'" title="選起來的字變成上下兩行（並列）；沒選＝放一個範例。「｜」＝從這裡換行">⫴ 並列</button>';
+        h+='<textarea id="e_'+k+'">'+esc(cur)+'</textarea><button type="button" class="wrbtn" data-wr="e_'+k+'" title="選起來的字變成上下兩行（並列）；沒選＝放一個範例。「｜」＝從這裡換行（最多 4 行）">⫴ 並列</button>'
+          +'<button type="button" class="wrbtn albtn" data-al="置中" data-ta="e_'+k+'" title="游標那一行置中（再按一次＝拿掉）">置中</button><button type="button" class="wrbtn albtn" data-al="靠右" data-ta="e_'+k+'" title="游標那一行靠右（再按一次＝拿掉）">靠右</button>';
       } else if (f.list){
         h+='<input id="e_'+k+'" value="'+esc(cur)+'" list="l_'+k+'"><datalist id="l_'+k+'">'+FORMS.map(function(x){ return '<option value="'+esc(x)+'">'; }).join("")+'</datalist>';
       } else {
@@ -1013,6 +1043,14 @@ var KB = (function () {
       var a=ta.selectionStart||0, z=ta.selectionEnd||0, v=ta.value, sel=v.slice(a,z).replace(/\[\/?(並|w)\]/g,""), ins=sel?"[並]"+sel+"[/並]":"[並]上面的字｜下面的字[/並]";
       ta.value=v.slice(0,a)+ins+v.slice(z); ta.focus(); try { ta.setSelectionRange(a+4, a+ins.length-5); } catch(e){}
       setHint(sel?"⫴ 好了：存了以後，卡片上這一段是上下兩行（自動對半；要自己決定從哪裡分，在那裡打「｜」）":"⫴ 放了一個範例：把字換掉（「｜」前面＝上面那一行）", false);
+    }; });
+    Array.prototype.forEach.call(out.querySelectorAll(".albtn"), function(b){ b.onclick=function(){
+      var ta=$(b.getAttribute("data-ta")); if (!ta) return;
+      var v=ta.value, at=ta.selectionStart||0, ls=v.lastIndexOf("\n", at-1)+1, le=v.indexOf("\n", at); if (le<0) le=v.length;
+      var line=v.slice(ls,le), AL=/^\[(置中|靠右|靠左|左右對齊)\]\s*/, m=AL.exec(line), want=b.getAttribute("data-al");
+      var body=m?line.slice(m[0].length):line, nl=(m&&m[1]===want)?body:"["+want+"]"+body;
+      ta.value=v.slice(0,ls)+nl+v.slice(le); ta.focus(); try { ta.setSelectionRange(ls+nl.length, ls+nl.length); } catch(e){}
+      setHint((m&&m[1]===want)?"這一行回到靠左":"這一行"+want+"（存了以後卡片、LINE 上都是）", false);
     }; });
     $("ecancel").onclick=function(){ renderCard(r, backTo); };
     $("e_mv").onclick=function(){ renderMove(r, backTo); };
