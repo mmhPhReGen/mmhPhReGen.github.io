@@ -86,6 +86,12 @@
   .search button{flex:0 0 46px; border:1.5px solid var(--line); background:var(--surface); color:var(--ink);
     border-radius:12px; font-size:19px; line-height:1; padding:0}
   .search button.on{background:var(--danger-soft); border-color:var(--danger); color:var(--danger)}
+  .wr{display:inline-flex; flex-direction:column; justify-content:center; vertical-align:middle; font-size:.64em; line-height:1.15; margin:0 .3em; letter-spacing:.05em; max-width:100%}
+  .wr>span{display:block; white-space:nowrap; text-align:justify; text-align-last:justify}
+  .wrbtn{margin-top:4px; padding:4px 10px; border-radius:8px; border:1px solid var(--line); background:var(--surface); color:var(--ink); font-size:13px; cursor:pointer}
+  .search button.kbopen{flex-basis:40px; font-size:17px; color:var(--muted)}
+  @media (min-width:760px){ .search button.kbopen{flex-basis:46px; font-size:19px} }
+  @media (hover:none) and (pointer:coarse){ .search button.kbopen{display:none} }
   .hint{grid-column:1 / -1; grid-row:3; font-size:12.5px; color:var(--muted); padding:7px 2px 0; min-height:26px; line-height:1.5}
   @media (min-width:760px){
     .top{padding:12px 18px 10px}
@@ -484,7 +490,7 @@
   @media (min-width:760px){ .offbar{padding:8px 18px; font-size:14px} .map.offmap{flex:0 0 auto; width:min(320px,100%); min-width:0; height:var(--maph,278px); margin-left:auto} }
 </style>
 <script src="cfg.js" defer></script>
-<script src="app.js?v=v8c" defer></script>
+<script src="app.js?v=v8e" defer></script>
 </head>
 <body>
 <header class="top"><div class="topin">
@@ -494,6 +500,7 @@
     <input id="q" placeholder="輸入 CODE、藥名、中文或位置，再按 Enter 鍵查詢" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="查藥">
     <button type="button" id="mic" title="用講的" aria-label="語音查藥">🎤</button>
     <button type="button" id="cam" title="拍照，或從相簿選一張" aria-label="拍照或選照片查藥">📷</button>
+    <button type="button" id="kbopen" class="kbopen" title="快速鍵（F4 存…）：看全部、自己改" aria-label="快速鍵">⌨</button>
     <input type="file" id="file" accept="image/*" hidden>
   </form>
   <div class="hint" id="hint"></div>
