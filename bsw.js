@@ -1,4 +1,4 @@
-var V = "by-v8f";
+var V = "by-v8f2";
 var ASSETS = ["app.js?v=v8f", "icon.png", "icon-192.png", "icon-512.png", "icon-512m.png", "manifest.webmanifest"];
 var PAGES = ["index.html"];
 var SOFT = ["cfg.js"];
@@ -8,7 +8,7 @@ function put(req, r) { try { var cp = r.clone(); caches.open(V).then(function (c
 function withTimeout(p, ms) { return new Promise(function (ok, bad) { var t = setTimeout(function () { bad(new Error("timeout")); }, ms); p.then(function (r) { clearTimeout(t); ok(r); }, function (e) { clearTimeout(t); bad(e); }); }); }
 function fromCache(req, alt) { return caches.open(V).then(function (c) { return c.match(req, { ignoreSearch: true }).then(function (r) { if (r) return r; return alt ? c.match(u(alt)) : null; }); }); }
 function netFirst(req, ms, alt) {
-  return withTimeout(fetch(req), ms).then(function (r) { if (r && r.ok) put(req, r); return r; }).catch(function () { return fromCache(req, alt).then(function (r) { return r || Response.error(); }); });
+  return withTimeout(fetch(req), ms).then(function (r) { if (r && r.ok) put(String(req.url).split(/[?#]/)[0], r); return r; }).catch(function () { return fromCache(req, alt).then(function (r) { return r || Response.error(); }); });
 }
 function cacheFirst(req) {
   return fromCache(req).then(function (r) { if (r) return r; return fetch(req).then(function (x) { if (x && x.ok) put(req, x); return x; }); });

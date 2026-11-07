@@ -2,6 +2,7 @@ if(window.top!==window.self){try{document.documentElement.innerHTML="";}catch(e)
 function hashParams(){var o={};String(location.hash||"").replace(/^#/,"").split("&").forEach(function(kv){var i=kv.indexOf("=");if(i>0){try{o[decodeURIComponent(kv.slice(0,i))]=decodeURIComponent(kv.slice(i+1));}catch(e){}}});return o;}
 var HP=hashParams(),X=HP.x||"",API="",SYNC_T=null,DKX="";
 var T=HP.dev||"",A=[],PICK=[],FILT="all",CUR=-1,PN=0,PICKN=0,RETRY=false;
+(function(){try{var K="blst";if(/^[0-9a-f]{32}$/.test(T)&&/^[A-Za-z0-9_-]{20,120}$/.test(X)){sessionStorage.setItem(K,JSON.stringify({x:X,t:T}));var s=JSON.parse(sessionStorage.getItem(K)||"null");if(s&&s.t===T){var f=[];["x","v","l"].forEach(function(k){if(HP[k])f.push(k+"="+encodeURIComponent(HP[k]));});history.replaceState(null,"",location.pathname+location.search+"#"+f.join("&"));}}else if(!T){var o=JSON.parse(sessionStorage.getItem(K)||"null");if(o&&o.x===X&&/^[0-9a-f]{32}$/.test(String(o.t||"")))T=o.t;}}catch(e){}})();
 var DK=(function(){var k="";try{k=localStorage.getItem("bdk")||"";}catch(e){k="";}if(/^[0-9a-f]{32}$/.test(k))return k;
  try{var a=new Uint8Array(16);crypto.getRandomValues(a);k=Array.prototype.map.call(a,function(x){return("0"+x.toString(16)).slice(-2);}).join("");localStorage.setItem("bdk",k);if(localStorage.getItem("bdk")!==k)k="";}catch(e){k="";}return k;})();
 function post(fn,a,bg){return fetch(API,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({v:1,fn:fn,t:T,dk:DKX,a:a}),credentials:"omit",cache:"no-store",referrerPolicy:"no-referrer",redirect:"follow",keepalive:!!bg}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json();});}
@@ -36,7 +37,7 @@ function gate(cb){
  crypto.subtle.digest("SHA-256",new TextEncoder().encode(DK+"|"+X)).then(function(b){DKX=hex(b).slice(0,32);cb("ok");},function(){cb("ok");});}
 var GATE_MSG={bad:"這條清單校對連結不完整。\n回 LINE 打「清單校對」，再按「📤 多張上傳」或「📋 待審清單」。",old:"這個瀏覽器太舊，請改用最新的 Chrome 或 Safari。"};
 var F=[["brand","商品名"],["loc","位置"],["form","劑型"],["zh","中文名"],["gen","學名"]];
-function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function $(id){return document.getElementById(id);}
 function load(){api().withSuccessHandler(function(r){if(r.err){$("cnt").textContent=r.err;return;}A=[];(r.rows||[]).forEach(function(d){d.src="lst";A.push(d);});((r.imp&&r.imp.rows)||[]).forEach(function(d){d.src="imp";A.push(d);});PROB=Array.isArray(r.imp&&r.imp.problems)?r.imp.problems:[];LOADED=true;draw();}).withFailureHandler(function(e){$("cnt").textContent="連不上："+e;}).lstData(T);}
 var PROB=[],LOADED=false;
